@@ -22,7 +22,9 @@
       "Bash(git rm:*)",
       "Bash(git add:*)",
       "Bash(copy history.js history_backup.js)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(start http://localhost:3000/history.html)",
+      "Bash(start http://localhost:3000/)"
     ],
     "deny": []
   }

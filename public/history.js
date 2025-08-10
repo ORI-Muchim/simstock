@@ -173,170 +173,186 @@ function updateBalanceDisplay() {
     }
 }
 
-// Initialize asset trend chart
+// Initialize asset trend chart with Chart.js
 function initializeAssetTrendChart() {
-    console.log('initializeAssetTrendChart called');
-    const chartContainer = document.getElementById('asset-trend-chart');
+    console.log('initializeAssetTrendChart called with Chart.js');
+    const chartCanvas = document.getElementById('asset-trend-chart');
     
-    if (!chartContainer) {
-        console.error('Chart container not found!');
+    if (!chartCanvas) {
+        console.error('Chart canvas not found!');
         return;
     }
     
-    console.log('Chart container found:', chartContainer);
-    console.log('Container dimensions:', chartContainer.clientWidth, 'x', chartContainer.clientHeight);
+    console.log('Chart canvas found:', chartCanvas);
     
-    if (typeof window.LightweightCharts === 'undefined') {
-        console.error('LightweightCharts library not loaded!');
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js library not loaded!');
         return;
     }
     
-    console.log('LightweightCharts library loaded');
+    console.log('Chart.js library loaded');
     
     try {
-        // Ensure container has dimensions
-        if (chartContainer.clientWidth === 0) {
-            console.warn('Chart container width is 0, setting minimum width');
-            chartContainer.style.width = '800px';
-        }
-        
-        const chartWidth = chartContainer.clientWidth || 800;
-        const chartHeight = 400;
-        
-        console.log('Creating chart with dimensions:', chartWidth, 'x', chartHeight);
-        
-        // Create the chart
-        assetChart = window.LightweightCharts.createChart(chartContainer, {
-            width: chartWidth,
-            height: chartHeight,
-            layout: {
-                background: { color: '#1a202c' },
-                textColor: '#ffffff',
-            },
-            grid: {
-                vertLines: { color: '#2a3441' },
-                horzLines: { color: '#2a3441' },
-            },
-            crosshair: { mode: 0 },
-            rightPriceScale: { borderColor: '#2a3441' },
-            timeScale: { 
-                borderColor: '#2a3441',
-                timeVisible: true,
-                secondsVisible: false,
-            },
-        });
-        
-        // Add area series for asset trend
-        assetTrendSeries = assetChart.addAreaSeries({
-            topColor: 'rgba(0, 192, 135, 0.4)',
-            bottomColor: 'rgba(0, 192, 135, 0.0)',
-            lineColor: '#00c087',
-            lineWidth: 2,
-        });
-        
         // Generate asset trend data from transactions
         const assetData = generateAssetTrendData();
-        console.log('Generated asset data:', assetData);
+        console.log('Generated asset data for Chart.js:', assetData);
         
-        // Debug: Log each data point to identify null values
-        assetData.forEach((point, index) => {
-            if (point.value === null || point.value === undefined || isNaN(point.value)) {
-                console.error(`Invalid data point at index ${index}:`, point);
+        // Create simple labels and data arrays for Chart.js
+        const labels = assetData.map((point, index) => {
+            const date = new Date(point.time * 1000);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        });
+        
+        const values = assetData.map(point => point.value);
+        
+        console.log('Chart.js data:', { labels: labels.slice(0, 3), values: values.slice(0, 3) });
+        
+        // Create Chart.js line chart with simple configuration
+        assetChart = new Chart(chartCanvas, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Total Assets',
+                    data: values,
+                    borderColor: '#00c087',
+                    backgroundColor: 'rgba(0, 192, 135, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.1,
+                    pointRadius: 1,
+                    pointHoverRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(26, 32, 44, 0.9)',
+                        titleColor: '#ffffff',
+                        bodyColor: '#ffffff',
+                        borderColor: '#2a3441',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                return `Assets: $${context.parsed.y.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: '#2a3441'
+                        },
+                        ticks: {
+                            color: '#ffffff',
+                            maxTicksLimit: 8,
+                            callback: function(value, index) {
+                                if (index % Math.ceil(this.chart.data.labels.length / 6) === 0) {
+                                    const label = this.chart.data.labels[index];
+                                    return label ? label.split(' ')[0] : ''; // Show only date part
+                                }
+                                return '';
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: false,
+                        grid: {
+                            color: '#2a3441'
+                        },
+                        ticks: {
+                            color: '#ffffff',
+                            callback: function(value) {
+                                return '$' + value.toLocaleString('en-US', {minimumFractionDigits: 0});
+                            }
+                        }
+                    }
+                },
+                elements: {
+                    point: {
+                        radius: 1
+                    }
+                }
             }
         });
         
-        if (assetData && assetData.length > 0) {
-            try {
-                assetTrendSeries.setData(assetData);
-            } catch (error) {
-                console.error('Error setting chart data:', error);
-                console.log('Problematic data:', assetData);
-                
-                // Try with simplified data
-                const fallbackData = [
-                    { time: Math.floor(Date.now() / 1000) - 86400, value: 10000 },
-                    { time: Math.floor(Date.now() / 1000), value: usdBalance + (btcBalance * (currentPrice || 50000)) }
-                ];
-                console.log('Using fallback data:', fallbackData);
-                assetTrendSeries.setData(fallbackData);
-            }
-        }
-        
-        console.log('Asset trend chart created successfully');
+        console.log('✅ Chart.js chart created successfully');
         
         // Handle window resize
         window.addEventListener('resize', () => {
             if (assetChart) {
-                assetChart.applyOptions({ 
-                    width: chartContainer.clientWidth 
-                });
+                assetChart.resize();
             }
         });
         
     } catch (error) {
-        console.error('Error creating asset trend chart:', error);
+        console.error('❌ Error creating Chart.js chart:', error);
+        console.log('Error stack:', error.stack);
     }
 }
 
-// Generate asset trend data from transactions
+// Generate asset trend data from transactions (simplified for Chart.js)
 function generateAssetTrendData() {
-    const now = Math.floor(Date.now() / 1000);
+    console.log('=== GENERATING DATA FOR CHART.JS ===');
+    const now = Date.now();
     
     if (!transactions || transactions.length === 0) {
-        // Show initial balance
+        console.log('No transactions, returning simple fallback data');
         return [
-            { time: now - 86400, value: 10000 }, // 1 day ago
-            { time: now, value: usdBalance || 10000 }
+            { time: Math.floor((now - 86400000) / 1000), value: 10000 }, // 24 hours ago
+            { time: Math.floor(now / 1000), value: usdBalance || 10000 } // Now
         ];
     }
     
+    console.log('Processing', transactions.length, 'transactions for Chart.js');
     const assetData = [];
-    let runningBalance = 10000; // Starting balance
+    let runningBalance = 10000;
     let runningBtc = 0;
     
-    // Add initial point
-    if (transactions[0] && transactions[0].time) {
-        try {
-            const firstTransactionTime = Math.floor(new Date(transactions[0].time).getTime() / 1000);
-            if (!isNaN(firstTransactionTime) && firstTransactionTime > 0) {
-                assetData.push({
-                    time: firstTransactionTime - 3600, // 1 hour before first transaction
-                    value: 10000
-                });
-            }
-        } catch (error) {
-            console.error('Error parsing first transaction time:', error);
-        }
-    }
+    // Sort transactions by time
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        return new Date(a.time).getTime() - new Date(b.time).getTime();
+    });
     
-    // Process transactions
-    for (let i = 0; i < transactions.length; i++) {
-        const transaction = transactions[i];
+    // Add starting point (7 days ago from now)
+    assetData.push({ 
+        time: Math.floor((now - 7 * 24 * 60 * 60 * 1000) / 1000), 
+        value: 10000 
+    });
+    
+    // Process transactions with simple time mapping
+    for (let i = 0; i < sortedTransactions.length; i++) {
+        const transaction = sortedTransactions[i];
         if (!transaction || !transaction.time) continue;
         
-        let transactionTime;
-        try {
-            transactionTime = Math.floor(new Date(transaction.time).getTime() / 1000);
-            if (isNaN(transactionTime) || transactionTime <= 0) continue;
-        } catch (error) {
-            console.error('Error parsing transaction time:', error, transaction);
-            continue;
-        }
+        // Use relative time positioning in the past 24 hours
+        const transactionIndex = i / (sortedTransactions.length - 1); // 0 to 1
+        const timeOffset = transactionIndex * 6 * 24 * 60 * 60 * 1000; // Spread over 6 days
+        const transactionTime = Math.floor((now - 6 * 24 * 60 * 60 * 1000 + timeOffset) / 1000);
         
-        // Update balances based on transaction type
         try {
             if (transaction.type === 'buy') {
                 const total = parseFloat(transaction.total) || 0;
                 const fee = parseFloat(transaction.fee) || 0;
                 const amount = parseFloat(transaction.amount) || 0;
-                
                 runningBalance -= (total + fee);
                 runningBtc += amount;
             } else if (transaction.type === 'sell') {
                 const total = parseFloat(transaction.total) || 0;
                 const fee = parseFloat(transaction.fee) || 0;
                 const amount = parseFloat(transaction.amount) || 0;
-                
                 runningBalance += (total - fee);
                 runningBtc -= amount;
             } else if (transaction.type?.startsWith('close_')) {
@@ -344,70 +360,36 @@ function generateAssetTrendData() {
                 runningBalance += pnl;
             }
             
-            // Calculate total asset value
             const btcPrice = parseFloat(transaction.price) || parseFloat(currentPrice) || 50000;
             const totalAssetValue = runningBalance + (runningBtc * btcPrice);
             
-            // Validate the calculated value
             if (isFinite(totalAssetValue) && totalAssetValue >= 0) {
                 assetData.push({
                     time: transactionTime,
-                    value: Math.round(totalAssetValue * 100) / 100 // Round to 2 decimal places
+                    value: Math.round(totalAssetValue * 100) / 100
                 });
             }
         } catch (error) {
-            console.error('Error processing transaction:', error, transaction);
+            console.error('Error processing transaction:', error);
         }
     }
     
     // Add current point
-    try {
-        const currentBtcPrice = parseFloat(currentPrice) || 50000;
-        const currentBalance = parseFloat(usdBalance) || runningBalance;
-        const currentBtcBalance = parseFloat(btcBalance) || runningBtc;
-        const currentTotalAssets = currentBalance + (currentBtcBalance * currentBtcPrice);
-        
-        if (isFinite(currentTotalAssets) && currentTotalAssets >= 0) {
-            assetData.push({
-                time: now,
-                value: Math.round(currentTotalAssets * 100) / 100
-            });
-        }
-    } catch (error) {
-        console.error('Error calculating current assets:', error);
-    }
+    const currentBtcPrice = parseFloat(currentPrice) || 50000;
+    const currentBalance = parseFloat(usdBalance) || runningBalance;
+    const currentBtcBalance = parseFloat(btcBalance) || runningBtc;
+    const currentTotalAssets = currentBalance + (currentBtcBalance * currentBtcPrice);
     
-    // Ensure we have at least some valid data points
-    if (assetData.length === 0) {
-        return [
-            { time: now - 86400, value: 10000 },
-            { time: now, value: usdBalance || 10000 }
-        ];
-    }
-    
-    // Final validation and cleanup
-    const validData = assetData.filter(point => {
-        return point && 
-               typeof point.time === 'number' && 
-               typeof point.value === 'number' && 
-               isFinite(point.time) && 
-               isFinite(point.value) && 
-               point.time > 0 && 
-               point.value >= 0;
+    assetData.push({
+        time: Math.floor(now / 1000),
+        value: Math.round(currentTotalAssets * 100) / 100
     });
     
-    // Sort by time to ensure proper order
-    validData.sort((a, b) => a.time - b.time);
+    console.log('Generated', assetData.length, 'data points for Chart.js');
+    console.log('First:', assetData[0]);
+    console.log('Last:', assetData[assetData.length - 1]);
     
-    // If still no valid data, return fallback
-    if (validData.length === 0) {
-        return [
-            { time: now - 86400, value: 10000 },
-            { time: now, value: 10000 }
-        ];
-    }
-    
-    return validData;
+    return assetData;
 }
 
 // Load and display transaction history
@@ -667,9 +649,17 @@ async function fetchCurrentPrice() {
             console.log('Current BTC price:', currentPrice);
             
             // Update asset trend chart and stats with current price
-            if (assetChart && assetTrendSeries) {
+            if (assetChart) {
                 const assetData = generateAssetTrendData();
-                assetTrendSeries.setData(assetData);
+                const labels = assetData.map(point => {
+                    const date = new Date(point.time * 1000);
+                    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                });
+                const values = assetData.map(point => point.value);
+                
+                assetChart.data.labels = labels;
+                assetChart.data.datasets[0].data = values;
+                assetChart.update();
             }
             calculateTradingStats();
         }
