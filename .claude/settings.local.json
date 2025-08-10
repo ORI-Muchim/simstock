@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.upbit.com)",
+      "WebFetch(domain:www.okx.com)",
+      "WebFetch(domain:tradingview.github.io)",
+      "Bash(node:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm install:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm start)",
+      "Bash(sqlite3:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell:*)",
+      "Bash(mv:*)",
+      "Bash(mkdir:*)",
+      "Bash(del chart.js config.js main.js trading.js ui.js websocket.js)",
+      "Bash(rm:*)",
+      "Bash(npm test)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)",
+      "Bash(copy history.js history_backup.js)",
+      "Bash(cp:*)"
+    ],
+    "deny": []
+  }
+}

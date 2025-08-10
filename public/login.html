@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoSim - Professional Trading Simulator</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #131318;
+            --bg-tertiary: #1c1c23;
+            --bg-glass: rgba(19, 19, 24, 0.8);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --text-tertiary: #6b6b7a;
+            --accent-primary: #3b82f6;
+            --accent-secondary: #1d4ed8;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-gold: #f59e0b;
+            --border-color: #2a2a35;
+            --border-light: #404050;
+            --gradient-primary: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            --gradient-secondary: linear-gradient(135deg, #10b981, #059669);
+            --shadow-primary: 0 4px 32px rgba(59, 130, 246, 0.12);
+            --shadow-secondary: 0 8px 40px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 60px rgba(59, 130, 246, 0.15);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
+                radial-gradient(circle at 40% 90%, rgba(245, 158, 11, 0.04) 0%, transparent 50%);
+            z-index: -2;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                conic-gradient(from 0deg at 50% 50%, 
+                    transparent, 
+                    rgba(59, 130, 246, 0.02) 30%, 
+                    transparent 60%, 
+                    rgba(16, 185, 129, 0.02) 90%, 
+                    transparent);
+            animation: rotate 60s linear infinite;
+            z-index: -1;
+        }
+
+        @keyframes rotate {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .login-container {
+            background: var(--bg-glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 440px;
+            box-shadow: var(--shadow-secondary), var(--shadow-glow);
+            position: relative;
+            animation: fadeInUp 0.8s ease-out;
+        }
+
+        .login-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            border-radius: 24px 24px 0 0;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo .icon-wrapper {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+
+        .logo i {
+            font-size: 3.5rem;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: pulse 3s ease-in-out infinite;
+        }
+
+        .logo h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff, #a0a0a0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .logo p {
+            color: var(--text-tertiary);
+            font-size: 0.95rem;
+            font-weight: 400;
+            letter-spacing: 0.01em;
+        }
+
+        .tab-container {
+            display: flex;
+            margin-bottom: 32px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            padding: 4px;
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            z-index: 1;
+        }
+
+        .tab-btn.active {
+            color: var(--text-primary);
+            background: var(--gradient-primary);
+            box-shadow: var(--shadow-primary);
+            transform: translateY(-1px);
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeInUp 0.4s ease-out;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            letter-spacing: 0.01em;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            font-weight: 400;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: 0.01em;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            background: rgba(59, 130, 246, 0.05);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-top: 8px;
+            position: relative;
+            overflow: hidden;
+            letter-spacing: 0.01em;
+        }
+
+        .submit-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            transition: left 0.6s;
+        }
+
+        .submit-btn:hover::before {
+            left: 100%;
+        }
+
+        .login-btn {
+            background: var(--gradient-primary);
+            color: white;
+            box-shadow: var(--shadow-primary);
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.25);
+        }
+
+        .register-btn {
+            background: var(--gradient-secondary);
+            color: white;
+            box-shadow: 0 4px 32px rgba(16, 185, 129, 0.12);
+        }
+
+        .register-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.25);
+        }
+
+        .demo-section {
+            margin-top: 32px;
+        }
+
+        .divider {
+            text-align: center;
+            margin: 28px 0;
+            position: relative;
+        }
+
+        .divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+        }
+
+        .divider span {
+            background: var(--bg-glass);
+            padding: 0 20px;
+            color: var(--text-tertiary);
+            font-size: 0.85rem;
+            font-weight: 500;
+            position: relative;
+            letter-spacing: 0.02em;
+        }
+
+        .demo-btn {
+            width: 100%;
+            padding: 14px 20px;
+            border: 1px solid var(--border-light);
+            border-radius: 12px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            letter-spacing: 0.01em;
+        }
+
+        .demo-btn:hover {
+            border-color: var(--accent-gold);
+            color: var(--accent-gold);
+            background: rgba(245, 158, 11, 0.05);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.1);
+        }
+
+        .message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            display: none;
+            animation: fadeInUp 0.3s ease-out;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+        }
+
+        .password-requirements {
+            font-size: 0.85rem;
+            color: var(--text-tertiary);
+            margin-top: 6px;
+            font-weight: 400;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .feature-list {
+            margin-top: 24px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .feature-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .feature-item i {
+            color: var(--accent-primary);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 480px) {
+            .login-container {
+                margin: 20px;
+                padding: 32px 24px;
+                border-radius: 20px;
+            }
+
+            .logo h1 {
+                font-size: 1.75rem;
+            }
+
+            .logo i {
+                font-size: 3rem;
+            }
+
+            .form-group input,
+            .submit-btn,
+            .demo-btn {
+                padding: 12px 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <div class="icon-wrapper">
+                <i class="fab fa-bitcoin"></i>
+            </div>
+            <h1>CryptoSim</h1>
+            <p>Professional Trading Simulator</p>
+        </div>
+
+        <div class="tab-container">
+            <button class="tab-btn active" data-tab="login">
+                <i class="fas fa-sign-in-alt"></i>
+                Login
+            </button>
+            <button class="tab-btn" data-tab="register">
+                <i class="fas fa-user-plus"></i>
+                Sign Up
+            </button>
+        </div>
+
+        <div id="error-message" class="message error-message"></div>
+        <div id="success-message" class="message success-message"></div>
+
+        <!-- Login Form -->
+        <div id="login-tab" class="tab-content active">
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <div class="input-wrapper">
+                        <input type="text" id="login-username" placeholder="Enter your username" required autofocus>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="login-password" placeholder="Enter your password" required>
+                    </div>
+                </div>
+                <button type="submit" class="submit-btn login-btn" id="login-submit">
+                    Sign In
+                </button>
+            </form>
+        </div>
+
+        <!-- Register Form -->
+        <div id="register-tab" class="tab-content">
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="reg-username">Username</label>
+                    <div class="input-wrapper">
+                        <input type="text" id="reg-username" placeholder="Choose a username" required minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]+">
+                    </div>
+                    <div class="password-requirements">3-20 characters, letters, numbers, underscore only</div>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="reg-password" placeholder="Create a password" required minlength="4">
+                    </div>
+                    <div class="password-requirements">4+ characters</div>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password-confirm">Confirm Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="reg-password-confirm" placeholder="Confirm your password" required>
+                    </div>
+                </div>
+                <button type="submit" class="submit-btn register-btn" id="register-submit">
+                    Create Account
+                </button>
+            </form>
+        </div>
+
+        <div class="demo-section">
+            <div class="divider">
+                <span>or</span>
+            </div>
+
+            <button class="demo-btn" id="demo-btn">
+                <i class="fas fa-play-circle"></i>
+                Start with Demo Account
+            </button>
+
+            <div class="feature-list">
+                <div class="feature-item">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Real-time cryptocurrency data</span>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-coins"></i>
+                    <span>$10,000 virtual trading balance</span>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>Risk-free trading simulation</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check if already logged in
+        if (localStorage.getItem('token')) {
+            window.location.href = '/';
+        }
+
+        function switchTab(tab, targetBtn) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            targetBtn.classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tab}-tab`).classList.add('active');
+
+            // Clear messages
+            hideMessages();
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+            errorDiv.style.display = 'block';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success-message');
+            successDiv.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+            successDiv.style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function hideMessages() {
+            document.getElementById('error-message').style.display = 'none';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        function setLoading(buttonId, isLoading) {
+            const button = document.getElementById(buttonId);
+            const originalText = button.textContent;
+            
+            if (isLoading) {
+                button.innerHTML = '<span class="loading-spinner"></span>Signing in...';
+                button.disabled = true;
+            } else {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            hideMessages();
+
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+
+            // Basic validation
+            if (!username || !password) {
+                showError('Please enter both username and password.');
+                return;
+            }
+
+            setLoading('login-submit', true);
+
+            try {
+                console.log('Attempting login for:', username);
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                console.log('Login response status:', response.status);
+                
+                let data;
+                try {
+                    data = await response.json();
+                } catch (parseError) {
+                    console.error('Failed to parse response JSON:', parseError);
+                    throw new Error('Invalid response from server');
+                }
+
+                if (response.ok) {
+                    console.log('Login successful');
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', data.username);
+                    showSuccess('Login successful! Redirecting...');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    console.log('Login failed:', data);
+                    // Handle validation errors
+                    if (data.errors && Array.isArray(data.errors)) {
+                        const errorMessages = data.errors.map(err => err.msg).join('. ');
+                        showError(errorMessages);
+                    } else {
+                        showError(data.error || 'Login failed. Please try again.');
+                    }
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showError('Connection failed. Please check your internet connection and ensure the server is running.');
+            } finally {
+                setLoading('login-submit', false);
+            }
+        }
+
+        async function handleRegister(event) {
+            event.preventDefault();
+            hideMessages();
+
+            const username = document.getElementById('reg-username').value.trim();
+            const password = document.getElementById('reg-password').value;
+            const confirmPassword = document.getElementById('reg-password-confirm').value;
+
+            // Basic validation
+            if (!username || !password || !confirmPassword) {
+                showError('Please fill in all fields.');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showError('Passwords do not match.');
+                return;
+            }
+
+            // Validate username format
+            if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+                showError('Username can only contain letters, numbers, and underscores.');
+                return;
+            }
+
+            // Validate username length
+            if (username.length < 3 || username.length > 20) {
+                showError('Username must be between 3 and 20 characters.');
+                return;
+            }
+
+            // Validate password format
+            if (password.length < 4) {
+                showError('Password must be at least 4 characters long.');
+                return;
+            }
+
+            setLoading('register-submit', true);
+
+            try {
+                console.log('Attempting registration for:', username);
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                console.log('Registration response status:', response.status);
+
+                let data;
+                try {
+                    data = await response.json();
+                } catch (parseError) {
+                    console.error('Failed to parse response JSON:', parseError);
+                    throw new Error('Invalid response from server');
+                }
+
+                if (response.ok) {
+                    console.log('Registration successful');
+                    showSuccess('Account created successfully! Logging you in...');
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', data.username);
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
+                } else {
+                    console.log('Registration failed:', data);
+                    // Handle validation errors from server
+                    if (data.errors && Array.isArray(data.errors)) {
+                        const errorMessages = data.errors.map(err => err.msg).join('. ');
+                        showError(errorMessages);
+                    } else {
+                        showError(data.error || 'Registration failed. Please try again.');
+                    }
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                showError('Connection failed. Please check your internet connection and ensure the server is running.');
+            } finally {
+                setLoading('register-submit', false);
+            }
+        }
+
+        async function loginAsDemo() {
+            hideMessages();
+            
+            // Create demo account with timestamp
+            const timestamp = Date.now();
+            const demoUsername = `demo_${timestamp}`;
+            const demoPassword = 'demo1234';
+
+            const demoBtn = document.querySelector('.demo-btn');
+            const originalContent = demoBtn.innerHTML;
+            demoBtn.innerHTML = '<span class="loading-spinner"></span>Creating demo account...';
+            demoBtn.disabled = true;
+
+            try {
+                console.log('Creating demo account:', demoUsername);
+                // Try to register demo account
+                const registerResponse = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        username: demoUsername, 
+                        password: demoPassword 
+                    })
+                });
+
+                console.log('Demo account response status:', registerResponse.status);
+
+                let data;
+                try {
+                    data = await registerResponse.json();
+                } catch (parseError) {
+                    console.error('Failed to parse demo account response JSON:', parseError);
+                    throw new Error('Invalid response from server');
+                }
+
+                if (registerResponse.ok) {
+                    console.log('Demo account created successfully');
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', data.username);
+                    showSuccess('Demo account created! Redirecting to trading platform...');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    console.log('Demo account creation failed:', data);
+                    if (data.errors && Array.isArray(data.errors)) {
+                        const errorMessages = data.errors.map(err => err.msg).join('. ');
+                        showError('Demo account creation failed: ' + errorMessages);
+                    } else {
+                        showError(data.error || 'Failed to create demo account. Please try again.');
+                    }
+                }
+            } catch (error) {
+                console.error('Demo account error:', error);
+                showError('Connection failed. Please check your internet connection and ensure the server is running.');
+            } finally {
+                demoBtn.innerHTML = originalContent;
+                demoBtn.disabled = false;
+            }
+        }
+
+        // Add event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tab = this.getAttribute('data-tab');
+                    switchTab(tab, this);
+                });
+            });
+
+            // Login form submission
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
+
+            // Register form submission
+            document.getElementById('register-form').addEventListener('submit', handleRegister);
+
+            // Demo button
+            document.getElementById('demo-btn').addEventListener('click', loginAsDemo);
+
+            // Add smooth focus effects
+            const inputs = document.querySelectorAll('input');
+            inputs.forEach(input => {
+                input.addEventListener('focus', function() {
+                    this.parentElement.style.transform = 'translateY(-1px)';
+                });
+                
+                input.addEventListener('blur', function() {
+                    this.parentElement.style.transform = 'translateY(0)';
+                });
+            });
+
+            // Add keyboard navigation
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && e.ctrlKey) {
+                    const activeTab = document.querySelector('.tab-content.active');
+                    const form = activeTab.querySelector('form');
+                    if (form) {
+                        form.dispatchEvent(new Event('submit', { cancelable: true }));
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
