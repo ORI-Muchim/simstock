@@ -361,26 +361,22 @@ function selectMarket(market) {
         currentCryptoBalance = ethBalance;
         document.getElementById('btc-balance').textContent = ethBalance.toFixed(8);
         
-        // Update wallet label
-        const walletLabels = document.querySelectorAll('.wallet-label');
-        walletLabels.forEach(label => {
-            if (label.textContent.includes('Balance')) {
-                label.textContent = 'ETH Balance';
-            }
-        });
+        // Update crypto balance label
+        const cryptoLabel = document.getElementById('crypto-balance-label');
+        if (cryptoLabel) {
+            cryptoLabel.textContent = 'ETH Balance';
+        }
     } else {
         coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1.png';
         coinIcon.alt = 'BTC';
         currentCryptoBalance = btcBalance;
         document.getElementById('btc-balance').textContent = btcBalance.toFixed(8);
         
-        // Update wallet label
-        const walletLabels = document.querySelectorAll('.wallet-label');
-        walletLabels.forEach(label => {
-            if (label.textContent.includes('Balance')) {
-                label.textContent = 'BTC Balance';
-            }
-        });
+        // Update crypto balance label
+        const cryptoLabel = document.getElementById('crypto-balance-label');
+        if (cryptoLabel) {
+            cryptoLabel.textContent = 'BTC Balance';
+        }
     }
     
     // Switch to trade page if not already there
@@ -2811,9 +2807,10 @@ function calculateSpotProfitLoss() {
 
 // Update UI elements
 function updateUI() {
-    // Calculate total assets
-    const btcValue = btcBalance * currentPrice; // currentPrice is already in USDT
-    const totalAssets = usdBalance + btcValue;
+    // Calculate total assets using marketPrices
+    const btcValue = btcBalance * (marketPrices['BTC/USDT'] || 0);
+    const ethValue = ethBalance * (marketPrices['ETH/USDT'] || 0);
+    const totalAssets = usdBalance + btcValue + ethValue;
     
     // Calculate unrealized P&L from leverage positions
     const unrealizedPnL = leveragePositions.reduce((sum, position) => sum + position.pnl, 0);
@@ -2829,13 +2826,17 @@ function updateUI() {
     
     const btcBalanceEl = document.getElementById('btc-balance');
     if (btcBalanceEl) {
-        const btcProfit = spotProfits.BTC || { profitPercent: 0, averageBuyPrice: 0 };
-        const profitText = btcProfit.profitPercent !== 0 ? 
-            ` (${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(2)}%)` : '';
-        const profitColor = btcProfit.profitPercent > 0 ? 'var(--accent-green)' : 
-                           btcProfit.profitPercent < 0 ? 'var(--accent-red)' : '';
+        // Get current crypto symbol and corresponding balance
+        const currentCrypto = currentMarket.split(/[-\/]/)[0]; // BTC or ETH
+        const currentBalance = currentCrypto === 'ETH' ? ethBalance : btcBalance;
+        const currentProfit = spotProfits[currentCrypto] || { profitPercent: 0, averageBuyPrice: 0 };
         
-        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)}<span style="color: ${profitColor}; font-size: 0.85em; margin-left: 4px;">${profitText}</span>`;
+        const profitText = currentProfit.profitPercent !== 0 ? 
+            ` (${currentProfit.profitPercent >= 0 ? '+' : ''}${currentProfit.profitPercent.toFixed(2)}%)` : '';
+        const profitColor = currentProfit.profitPercent > 0 ? 'var(--accent-green)' : 
+                           currentProfit.profitPercent < 0 ? 'var(--accent-red)' : '';
+        
+        btcBalanceEl.innerHTML = `${currentBalance.toFixed(8)}<span style="color: ${profitColor}; font-size: 0.85em; margin-left: 4px;">${profitText}</span>`;
     }
     
     // Update current market's spot profit display
