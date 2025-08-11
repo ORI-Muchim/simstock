@@ -654,6 +654,8 @@ body {
     justify-content: space-between;
     align-items: center;
     font-size: 0.85em;
+    margin-bottom: 8px;
+    padding: 4px 0;
 }
 
 .profit-label {
@@ -675,10 +677,42 @@ body {
     color: var(--accent-red);
 }
 
+.profit-combined {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.95em;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: -0.02em;
+}
+
+.profit-combined.positive {
+    color: var(--accent-green);
+}
+
+.profit-combined.negative {
+    color: var(--accent-red);
+}
+
 .profit-avg-price {
     color: var(--text-secondary);
     font-weight: 500;
-    font-size: 0.85em;
+    font-size: 0.95em;
+}
+
+.profit-dollar {
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 0.8em;
+    margin-left: 8px;
+    opacity: 0.9;
+}
+
+.profit-dollar.positive {
+    color: var(--accent-green);
+}
+
+.profit-dollar.negative {
+    color: var(--accent-red);
 }
 
 .price-label {

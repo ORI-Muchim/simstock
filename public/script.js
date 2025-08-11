@@ -2841,13 +2841,13 @@ function updateUI() {
     
     // Update current market's spot profit display
     const currentCryptoTitleEl = document.getElementById('current-crypto-title');
-    const currentProfitValueEl = document.getElementById('current-profit-value');
+    const currentProfitCombinedEl = document.getElementById('current-profit-combined');
     const currentAvgPriceEl = document.getElementById('current-avg-price');
     
-    if (currentCryptoTitleEl && currentProfitValueEl && currentAvgPriceEl) {
+    if (currentCryptoTitleEl && currentProfitCombinedEl && currentAvgPriceEl) {
         // Get the current crypto symbol from the current market
         const currentCrypto = currentMarket.split(/[-\/]/)[0]; // BTC or ETH (handle both formats)
-        const currentProfit = spotProfits[currentCrypto] || { profitPercent: 0, averageBuyPrice: 0 };
+        const currentProfit = spotProfits[currentCrypto] || { profitPercent: 0, averageBuyPrice: 0, profit: 0 };
         
         // Update title
         const cryptoNames = {
@@ -2856,10 +2856,13 @@ function updateUI() {
         };
         currentCryptoTitleEl.textContent = cryptoNames[currentCrypto] || `${currentCrypto} Spot`;
         
-        // Update profit percentage
-        const profitText = `${currentProfit.profitPercent >= 0 ? '+' : ''}${currentProfit.profitPercent.toFixed(2)}%`;
-        currentProfitValueEl.textContent = profitText;
-        currentProfitValueEl.className = 'profit-value ' + 
+        // Update combined profit display: $amount (percentage%)
+        const dollarSign = currentProfit.profit >= 0 ? '+' : '';
+        const percentSign = currentProfit.profitPercent >= 0 ? '+' : '';
+        const profitCombinedText = `${dollarSign}$${currentProfit.profit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${percentSign}${currentProfit.profitPercent.toFixed(2)}%)`;
+        
+        currentProfitCombinedEl.textContent = profitCombinedText;
+        currentProfitCombinedEl.className = 'profit-combined ' + 
             (currentProfit.profitPercent > 0 ? 'positive' : currentProfit.profitPercent < 0 ? 'negative' : '');
         
         // Update average buy price
