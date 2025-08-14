@@ -14,31 +14,33 @@
         }
 
         :root {
-            --bg-primary: #0a0a0f;
-            --bg-secondary: #131318;
-            --bg-tertiary: #1c1c23;
-            --bg-glass: rgba(19, 19, 24, 0.8);
+            --bg-primary: #0a0e17;
+            --bg-secondary: #121821;
+            --bg-tertiary: #1a202c;
+            --bg-hover: #252d3d;
+            --bg-glass: rgba(18, 24, 33, 0.9);
             --text-primary: #ffffff;
-            --text-secondary: #a0a0a0;
-            --text-tertiary: #6b6b7a;
-            --accent-primary: #3b82f6;
-            --accent-secondary: #1d4ed8;
-            --accent-green: #10b981;
-            --accent-red: #ef4444;
-            --accent-gold: #f59e0b;
-            --border-color: #2a2a35;
-            --border-light: #404050;
-            --gradient-primary: linear-gradient(135deg, #3b82f6, #1d4ed8);
-            --gradient-secondary: linear-gradient(135deg, #10b981, #059669);
-            --shadow-primary: 0 4px 32px rgba(59, 130, 246, 0.12);
+            --text-secondary: #8b98ab;
+            --text-tertiary: #5a6374;
+            --accent-blue: #00c087;
+            --accent-red: #ff5a5f;
+            --accent-green: #00d68f;
+            --accent-yellow: #ffb800;
+            --border-color: #2a3441;
+            --border-light: #364152;
+            --gradient-primary: linear-gradient(135deg, #00c087, #00a570);
+            --gradient-secondary: linear-gradient(135deg, #00d68f, #00b87a);
+            --shadow-primary: 0 4px 32px rgba(0, 192, 135, 0.12);
             --shadow-secondary: 0 8px 40px rgba(0, 0, 0, 0.4);
-            --shadow-glow: 0 0 60px rgba(59, 130, 246, 0.15);
+            --shadow-glow: 0 0 60px rgba(0, 192, 135, 0.15);
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
+            line-height: 1.5;
+            font-size: 14px;
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -137,10 +139,7 @@
 
         .logo i {
             font-size: 3.5rem;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--accent-blue);
             animation: pulse 3s ease-in-out infinite;
         }
 
@@ -189,7 +188,7 @@
 
         .tab-btn.active {
             color: var(--text-primary);
-            background: var(--gradient-primary);
+            background: var(--accent-blue);
             box-shadow: var(--shadow-primary);
             transform: translateY(-1px);
         }
@@ -226,6 +225,37 @@
             position: relative;
         }
 
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            z-index: 2;
+        }
+
+        .password-toggle:hover {
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .password-toggle:focus {
+            outline: none;
+            color: var(--accent-blue);
+        }
+
+        .form-group input[type="password"],
+        .form-group input[type="text"] {
+            padding-right: 44px;
+        }
+
         .form-group input {
             width: 100%;
             padding: 14px 16px;
@@ -241,9 +271,9 @@
 
         .form-group input:focus {
             outline: none;
-            border-color: var(--accent-primary);
-            background: rgba(59, 130, 246, 0.05);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            border-color: var(--accent-blue);
+            background: rgba(0, 192, 135, 0.05);
+            box-shadow: 0 0 0 3px rgba(0, 192, 135, 0.1);
             transform: translateY(-1px);
         }
 
@@ -282,25 +312,26 @@
         }
 
         .login-btn {
-            background: var(--gradient-primary);
+            background: var(--accent-blue);
             color: white;
             box-shadow: var(--shadow-primary);
         }
 
         .login-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.25);
+            box-shadow: 0 8px 25px rgba(0, 192, 135, 0.25);
+            background: var(--accent-green);
         }
 
         .register-btn {
-            background: var(--gradient-secondary);
+            background: var(--accent-green);
             color: white;
-            box-shadow: 0 4px 32px rgba(16, 185, 129, 0.12);
+            box-shadow: 0 4px 32px rgba(0, 214, 143, 0.12);
         }
 
         .register-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.25);
+            box-shadow: 0 8px 25px rgba(0, 214, 143, 0.25);
         }
 
         .demo-section {
@@ -352,11 +383,11 @@
         }
 
         .demo-btn:hover {
-            border-color: var(--accent-gold);
-            color: var(--accent-gold);
-            background: rgba(245, 158, 11, 0.05);
+            border-color: var(--accent-yellow);
+            color: var(--accent-yellow);
+            background: rgba(255, 184, 0, 0.05);
             transform: translateY(-1px);
-            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.1);
+            box-shadow: 0 4px 20px rgba(255, 184, 0, 0.1);
         }
 
         .message {
@@ -425,7 +456,7 @@
         }
 
         .feature-item i {
-            color: var(--accent-primary);
+            color: var(--accent-blue);
             font-size: 0.9rem;
         }
 
@@ -489,6 +520,9 @@
                     <label for="login-password">Password</label>
                     <div class="input-wrapper">
                         <input type="password" id="login-password" placeholder="Enter your password" required>
+                        <button type="button" class="password-toggle" aria-label="Show password" data-target="login-password">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     </div>
                 </div>
                 <button type="submit" class="submit-btn login-btn" id="login-submit">
@@ -511,6 +545,9 @@
                     <label for="reg-password">Password</label>
                     <div class="input-wrapper">
                         <input type="password" id="reg-password" placeholder="Create a password" required minlength="4">
+                        <button type="button" class="password-toggle" aria-label="Show password" data-target="reg-password">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     </div>
                     <div class="password-requirements">4+ characters</div>
                 </div>
@@ -518,6 +555,9 @@
                     <label for="reg-password-confirm">Confirm Password</label>
                     <div class="input-wrapper">
                         <input type="password" id="reg-password-confirm" placeholder="Confirm your password" required>
+                        <button type="button" class="password-toggle" aria-label="Show password" data-target="reg-password-confirm">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     </div>
                 </div>
                 <button type="submit" class="submit-btn register-btn" id="register-submit">
@@ -595,15 +635,15 @@
             document.getElementById('success-message').style.display = 'none';
         }
 
-        function setLoading(buttonId, isLoading) {
+        function setLoading(buttonId, isLoading, loadingText) {
             const button = document.getElementById(buttonId);
-            const originalText = button.textContent;
             
             if (isLoading) {
-                button.innerHTML = '<span class="loading-spinner"></span>Signing in...';
+                button.dataset.originalText = button.innerHTML;
+                button.innerHTML = `<span class="loading-spinner"></span>${loadingText || 'Loading...'}`;
                 button.disabled = true;
             } else {
-                button.innerHTML = originalText;
+                button.innerHTML = button.dataset.originalText || button.innerHTML;
                 button.disabled = false;
             }
         }
@@ -617,11 +657,11 @@
 
             // Basic validation
             if (!username || !password) {
-                showError('Please enter both username and password.');
+                showError('Please enter both username and password');
                 return;
             }
 
-            setLoading('login-submit', true);
+            setLoading('login-submit', true, 'Signing in...');
 
             try {
                 console.log('Attempting login for:', username);
@@ -658,12 +698,12 @@
                         const errorMessages = data.errors.map(err => err.msg).join('. ');
                         showError(errorMessages);
                     } else {
-                        showError(data.error || 'Login failed. Please try again.');
+                        showError(data.error || 'Login failed. Please try again');
                     }
                 }
             } catch (error) {
                 console.error('Login error:', error);
-                showError('Connection failed. Please check your internet connection and ensure the server is running.');
+                showError('Connection failed. Please check your internet connection');
             } finally {
                 setLoading('login-submit', false);
             }
@@ -679,34 +719,34 @@
 
             // Basic validation
             if (!username || !password || !confirmPassword) {
-                showError('Please fill in all fields.');
+                showError('Please fill in all fields');
                 return;
             }
 
             if (password !== confirmPassword) {
-                showError('Passwords do not match.');
+                showError('Passwords do not match');
                 return;
             }
 
             // Validate username format
             if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-                showError('Username can only contain letters, numbers, and underscores.');
+                showError('Username can only contain letters, numbers, and underscores');
                 return;
             }
 
             // Validate username length
             if (username.length < 3 || username.length > 20) {
-                showError('Username must be between 3 and 20 characters.');
+                showError('Username must be between 3 and 20 characters');
                 return;
             }
 
             // Validate password format
             if (password.length < 4) {
-                showError('Password must be at least 4 characters long.');
+                showError('Password must be at least 4 characters long');
                 return;
             }
 
-            setLoading('register-submit', true);
+            setLoading('register-submit', true, 'Creating account...');
 
             try {
                 console.log('Attempting registration for:', username);
@@ -743,12 +783,12 @@
                         const errorMessages = data.errors.map(err => err.msg).join('. ');
                         showError(errorMessages);
                     } else {
-                        showError(data.error || 'Registration failed. Please try again.');
+                        showError(data.error || 'Registration failed. Please try again');
                     }
                 }
             } catch (error) {
                 console.error('Registration error:', error);
-                showError('Connection failed. Please check your internet connection and ensure the server is running.');
+                showError('Connection failed. Please check your internet connection');
             } finally {
                 setLoading('register-submit', false);
             }
@@ -805,15 +845,33 @@
                         const errorMessages = data.errors.map(err => err.msg).join('. ');
                         showError('Demo account creation failed: ' + errorMessages);
                     } else {
-                        showError(data.error || 'Failed to create demo account. Please try again.');
+                        showError(data.error || 'Failed to create demo account. Please try again');
                     }
                 }
             } catch (error) {
                 console.error('Demo account error:', error);
-                showError('Connection failed. Please check your internet connection and ensure the server is running.');
+                showError('Connection failed. Please check your internet connection');
             } finally {
                 demoBtn.innerHTML = originalContent;
                 demoBtn.disabled = false;
+            }
+        }
+
+        function togglePasswordVisibility(button) {
+            const targetId = button.getAttribute('data-target');
+            const passwordInput = document.getElementById(targetId);
+            const icon = button.querySelector('i');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+                button.setAttribute('aria-label', 'Hide password');
+            } else {
+                passwordInput.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+                button.setAttribute('aria-label', 'Show password');
             }
         }
 
@@ -824,6 +882,13 @@
                 btn.addEventListener('click', function() {
                     const tab = this.getAttribute('data-tab');
                     switchTab(tab, this);
+                });
+            });
+
+            // Password visibility toggles
+            document.querySelectorAll('.password-toggle').forEach(button => {
+                button.addEventListener('click', function() {
+                    togglePasswordVisibility(this);
                 });
             });
 

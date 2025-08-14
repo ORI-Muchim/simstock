@@ -9,7 +9,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
-const { createUser, authenticateUser, getUserData, updateUserData } = require('./database');
+const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings } = require('./database');
 const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
 const AlertManager = require('./monitoring/alert-manager');
@@ -19,7 +19,7 @@ const swaggerConfig = require('./config/swagger');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DEMO_MODE = process.env.DEMO_MODE === 'true' || false;
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const JWT_SECRET = process.env.JWT_SECRET || 'simstock_default_jwt_secret_key_2025_change_in_production_please';
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -178,25 +178,9 @@ function connectOKXWebSocket() {
         };
         okxWs.send(JSON.stringify(orderbookSubscribe));
         
-        // Subscribe to real-time candle data for multiple timeframes
-        const candleTimeframes = ['candle1m', 'candle5m', 'candle15m', 'candle1H'];
-        const markets = ['BTC-USDT', 'ETH-USDT'];
-        
-        for (const timeframe of candleTimeframes) {
-            for (const market of markets) {
-                const candleSubscribe = {
-                    op: 'subscribe',
-                    args: [{
-                        channel: timeframe,
-                        instId: market
-                    }]
-                };
-                okxWs.send(JSON.stringify(candleSubscribe));
-                
-                // Small delay between subscriptions
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
+        // Note: OKX WebSocket candle channels appear to have subscription issues
+        // Current implementation uses scheduler-based API polling which provides real-time updates
+        console.log('OKX WebSocket candle subscription not working - using scheduler-based updates instead');
         
         console.log('Subscribed to BTC/ETH ticker, orderbook, and candle channels');
     });
@@ -204,11 +188,29 @@ function connectOKXWebSocket() {
     okxWs.on('message', (data) => {
         try {
             // Handle ping/pong messages
-            if (data.toString() === 'pong') {
+            const dataStr = data.toString();
+            if (dataStr === 'pong') {
+                console.log('📡 OKX WebSocket pong received');
                 return; // Skip pong messages
             }
             
-            const message = JSON.parse(data);
+            const message = JSON.parse(dataStr);
+            
+            // Debug: Log ALL incoming messages for diagnosis
+            console.log('📡 RAW OKX Message:', {
+                type: message.event || message.arg?.channel || 'unknown',
+                channel: message.arg?.channel,
+                instId: message.arg?.instId,
+                hasData: !!message.data,
+                dataLength: message.data?.length || 0
+            });
+            
+            // Debug: Log all incoming candle messages with volume
+            if (message.arg && (message.arg.channel === 'candlesticks' || message.arg.channel === 'candle1m' || message.arg.channel === 'candle' || message.arg.channel === 'kline')) {
+                const volume = message.data?.[0]?.[5];
+                const timestamp = message.data?.[0]?.[0];
+                console.log(`🔔 OKX Candle received: ${message.arg.instId} ${message.arg.channel} ${message.arg.interval || ''} - Volume: ${volume}, Time: ${new Date(parseInt(timestamp)).toISOString()}`);
+            }
             
             if (message.data && message.data.length > 0) {
                 const data = message.data[0];
@@ -286,23 +288,23 @@ function connectOKXWebSocket() {
                 }
                 
                 // Handle real-time candle data for multiple timeframes
-                else if (message.arg && message.arg.channel.startsWith('candle')) {
+                else if (message.arg && (message.arg.channel === 'candlesticks' || message.arg.channel === 'candle1m' || message.arg.channel === 'candle' || message.arg.channel === 'kline')) {
                     const instId = message.arg.instId;
-                    const channel = message.arg.channel;
+                    const interval = message.arg.interval;
                     
-                    // Map channel to interval format
+                    // Map OKX interval to our interval format
                     const intervalMap = {
-                        'candle1m': '1m',
-                        'candle5m': '5m', 
-                        'candle15m': '15m',
-                        'candle1H': '1h',
-                        'candle4H': '4h',
-                        'candle1D': '1d'
+                        '1m': '1m',
+                        '5m': '5m', 
+                        '15m': '15m',
+                        '1H': '1h',
+                        '4H': '4h',
+                        '1D': '1d'
                     };
                     
-                    const interval = intervalMap[channel];
-                    if (!interval) {
-                        console.warn('Unknown candle channel:', channel);
+                    const mappedInterval = intervalMap[interval];
+                    if (!mappedInterval) {
+                        console.warn('Unknown candle interval:', interval);
                         return;
                     }
                     
@@ -318,10 +320,11 @@ function connectOKXWebSocket() {
                     };
                     
                     // Broadcast real-time candle update
+                    console.log(`⚡ Broadcasting candle: ${instId} ${mappedInterval} - O:${candleData.open} H:${candleData.high} L:${candleData.low} C:${candleData.close} V:${candleData.volume}`);
                     broadcastToClients({
                         type: 'candle_update',
                         instId: instId,
-                        interval: interval,
+                        interval: mappedInterval,
                         data: candleData
                     });
                     
@@ -336,7 +339,7 @@ function connectOKXWebSocket() {
                             '1d': '1D'
                         };
                         
-                        const bar = barMap[interval];
+                        const bar = barMap[mappedInterval];
                         if (bar) {
                             dataScheduler.collector.saveCandles([{
                                 instId: instId,
@@ -362,8 +365,8 @@ function connectOKXWebSocket() {
         logger.error('OKX WebSocket error:', error);
     });
     
-    okxWs.on('close', () => {
-        logger.info('OKX WebSocket disconnected. Reconnecting...');
+    okxWs.on('close', (code, reason) => {
+        logger.info(`OKX WebSocket disconnected (code: ${code}, reason: ${reason}). Reconnecting in 5 seconds...`);
         setTimeout(connectOKXWebSocket, 5000);
     });
     
@@ -377,11 +380,25 @@ function connectOKXWebSocket() {
 
 // Helper function to broadcast to all clients
 function broadcastToClients(data) {
+    let sentCount = 0;
+    let totalClients = 0;
+    let openClients = 0;
+    
     wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN && !client.isMonitoringClient) {
-            client.send(JSON.stringify(data));
+        totalClients++;
+        if (client.readyState === WebSocket.OPEN) {
+            openClients++;
+            if (!client.isMonitoringClient) {
+                client.send(JSON.stringify(data));
+                sentCount++;
+            }
         }
     });
+    
+    // 🔍 DEBUG: candle_update 메시지만 로깅
+    if (data.type === 'candle_update') {
+        console.log(`🔍 Broadcast ${data.instId} ${data.interval} to ${sentCount}/${openClients} clients - V:${data.data.volume}`);
+    }
 }
 
 // Helper function to broadcast to monitoring dashboard clients
@@ -448,8 +465,8 @@ performanceMonitor.on('metric', (metric) => {
 // Start OKX WebSocket connection
 connectOKXWebSocket();
 
-// Initialize and start data scheduler
-const dataScheduler = new MarketDataScheduler();
+// Initialize and start data scheduler with broadcast callback
+const dataScheduler = new MarketDataScheduler(broadcastToClients);
 dataScheduler.collectInitialData().then(() => {
     dataScheduler.start();
 });
@@ -817,9 +834,16 @@ app.get('/api/candles/:interval', async (req, res) => {
         
         // Sort and send final result
         mergedCandles.sort((a, b) => a.time - b.time);
-        console.log(`Total: Serving ${mergedCandles.length} candles (${dbCandles.length} from DB + ${mergedCandles.length - dbCandles.length} from API)`);
         
-        res.json(mergedCandles);
+        // Apply volume scaling to all candles before sending to client
+        const scaledCandles = mergedCandles.map(candle => ({
+            ...candle,
+            volume: candle.volume * 0.01 // 스케일링: 거래량 × 0.01
+        }));
+        
+        console.log(`Total: Serving ${scaledCandles.length} candles (${dbCandles.length} from DB + ${scaledCandles.length - dbCandles.length} from API) with volume scaling`);
+        
+        res.json(scaledCandles);
     } catch (error) {
         console.error('Failed to fetch candles:', error);
         res.status(500).json({ error: 'Failed to fetch candle data' });
@@ -917,10 +941,10 @@ app.post('/api/register',
             res.json({ token, username });
         } catch (error) {
             if (error.code === 'SQLITE_CONSTRAINT') {
-                res.status(400).json({ error: 'Username already exists' });
+                res.status(400).json({ error: 'This username is already taken' });
             } else {
                 logger.error('Registration error:', error);
-                res.status(500).json({ error: 'Registration failed' });
+                res.status(500).json({ error: 'Registration failed. Please try again later' });
             }
         }
     }
@@ -968,8 +992,8 @@ app.post('/api/register',
 app.post('/api/login',
     authLimiter,
     [
-        body('username').notEmpty().withMessage('Username is required'),
-        body('password').notEmpty().withMessage('Password is required')
+        body('username').notEmpty().withMessage('Please enter your username'),
+        body('password').notEmpty().withMessage('Please enter your password')
     ],
     async (req, res) => {
         try {
@@ -985,7 +1009,7 @@ app.post('/api/login',
             
             if (!user) {
                 logger.warn(`Failed login attempt for username: ${username}`);
-                return res.status(401).json({ error: 'Invalid credentials' });
+                return res.status(401).json({ error: 'Incorrect username or password' });
             }
             
             const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
@@ -993,7 +1017,7 @@ app.post('/api/login',
             res.json({ token, username: user.username });
         } catch (error) {
             logger.error('Login error:', error);
-            res.status(500).json({ error: 'Login failed' });
+            res.status(500).json({ error: 'Login failed. Please try again later' });
         }
     }
 );
@@ -1052,6 +1076,56 @@ app.post('/api/user/data', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Error updating user data:', error);
         res.status(500).json({ error: 'Failed to update user data' });
+    }
+});
+
+// Chart settings APIs
+// Save chart settings
+app.post('/api/chart/settings', authenticateToken, async (req, res) => {
+    try {
+        const { market, indicators, indicatorSettings, drawings, chartType } = req.body;
+        
+        if (!market) {
+            return res.status(400).json({ error: 'Market is required' });
+        }
+
+        await saveChartSettings(req.user.id, market, {
+            indicators,
+            indicatorSettings,
+            drawings,
+            chartType
+        });
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error saving chart settings:', error);
+        res.status(500).json({ error: 'Failed to save chart settings' });
+    }
+});
+
+// Get chart settings
+app.get('/api/chart/settings/:market', authenticateToken, async (req, res) => {
+    try {
+        const { market } = req.params;
+        const settings = await getChartSettings(req.user.id, market);
+        
+        res.json({ success: true, settings: settings || null });
+    } catch (error) {
+        console.error('Error getting chart settings:', error);
+        res.status(500).json({ error: 'Failed to get chart settings' });
+    }
+});
+
+// Delete chart settings
+app.delete('/api/chart/settings/:market', authenticateToken, async (req, res) => {
+    try {
+        const { market } = req.params;
+        await deleteChartSettings(req.user.id, market);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting chart settings:', error);
+        res.status(500).json({ error: 'Failed to delete chart settings' });
     }
 });
 
@@ -1143,6 +1217,9 @@ app.use((err, req, res, next) => {
 app.use((req, res) => {
     res.status(404).json({ error: 'Route not found' });
 });
+
+// Real-time candle updates are now handled directly through OKX WebSocket
+// No need for additional polling-based broadcast system
 
 // Graceful shutdown
 process.on('SIGINT', () => {

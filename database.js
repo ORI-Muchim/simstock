@@ -38,6 +38,22 @@ db.serialize(() => {
             console.error('Error adding timezone column:', err);
         }
     });
+
+    // Chart settings table
+    db.run(`
+        CREATE TABLE IF NOT EXISTS chart_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            market TEXT NOT NULL,
+            indicators TEXT DEFAULT '{}',
+            indicator_settings TEXT DEFAULT '{}',
+            drawings TEXT DEFAULT '[]',
+            chart_type TEXT DEFAULT 'candlestick',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            UNIQUE(user_id, market)
+        )
+    `);
 });
 
 // User functions
@@ -121,10 +137,67 @@ const updateUserData = (userId, data) => {
     });
 };
 
+// Chart settings functions
+const saveChartSettings = (userId, market, settings) => {
+    return new Promise((resolve, reject) => {
+        const { indicators, indicatorSettings, drawings, chartType } = settings;
+        
+        db.run(`
+            INSERT OR REPLACE INTO chart_settings 
+            (user_id, market, indicators, indicator_settings, drawings, chart_type, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `, [
+            userId,
+            market,
+            JSON.stringify(indicators || {}),
+            JSON.stringify(indicatorSettings || {}),
+            JSON.stringify(drawings || []),
+            chartType || 'candlestick'
+        ], (err) => {
+            if (err) return reject(err);
+            resolve();
+        });
+    });
+};
+
+const getChartSettings = (userId, market) => {
+    return new Promise((resolve, reject) => {
+        db.get(
+            'SELECT * FROM chart_settings WHERE user_id = ? AND market = ?',
+            [userId, market],
+            (err, data) => {
+                if (err) return reject(err);
+                if (data) {
+                    data.indicators = JSON.parse(data.indicators);
+                    data.indicator_settings = JSON.parse(data.indicator_settings);
+                    data.drawings = JSON.parse(data.drawings);
+                }
+                resolve(data);
+            }
+        );
+    });
+};
+
+const deleteChartSettings = (userId, market) => {
+    return new Promise((resolve, reject) => {
+        db.run(
+            'DELETE FROM chart_settings WHERE user_id = ? AND market = ?',
+            [userId, market],
+            (err) => {
+                if (err) return reject(err);
+                resolve();
+            }
+        );
+    });
+};
+
 module.exports = {
     db,
     createUser,
     authenticateUser,
     getUserData,
-    updateUserData
+    updateUserData,
+    saveChartSettings,
+    getChartSettings,
+    deleteChartSettings
 };

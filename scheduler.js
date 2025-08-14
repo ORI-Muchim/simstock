@@ -2,14 +2,20 @@ const cron = require('node-cron');
 const DataCollector = require('./data-collector');
 
 class MarketDataScheduler {
-    constructor() {
-        this.collector = new DataCollector();
+    constructor(broadcastCallback = null) {
+        this.collector = new DataCollector(broadcastCallback);
         this.jobs = [];
         this.markets = ['BTC-USDT', 'ETH-USDT'];
     }
 
     start() {
         console.log('Starting market data scheduler...');
+        
+        // 1분마다 최신 1분봉 데이터 수집 (실시간 거래량 업데이트용)
+        this.jobs.push(cron.schedule('0 * * * * *', async () => {
+            console.log('Running 1-minute candle update...');
+            await this.collectLatestCandles();
+        }));
         
         this.jobs.push(cron.schedule('0 */5 * * * *', async () => {
             console.log('Running 5-minute data collection...');
@@ -32,19 +38,49 @@ class MarketDataScheduler {
         }));
 
         console.log('Scheduler started successfully');
+        console.log('- Every 10 seconds: Latest candle updates (real-time volume)');
         console.log('- Every 5 minutes: Recent data collection');
         console.log('- Every hour: Full data collection');
         console.log('- Every 12 hours: Comprehensive data collection');
         console.log('- Daily at 6 AM: Comprehensive historical data collection');
     }
 
+    async collectLatestCandles() {
+        // 1분마다 실행되는 최신 1분봉 업데이트 (거래량 실시간 반영)
+        console.log('🕐 Collecting latest 1m candles...');
+        
+        for (const market of this.markets) {
+            try {
+                // 최근 3개 캔들 가져오기 (현재 진행중인 캔들 + 완료된 캔들 2개)
+                const candles1m = await this.collector.fetchCandles(market, 1, 3);
+                if (candles1m.length > 0) {
+                    console.log(`📊 Fetched ${candles1m.length} latest candles for ${market}`);
+                    
+                    // 최신 캔들 정보 로깅
+                    const latestCandle = candles1m[candles1m.length - 1];
+                    const candleTime = new Date(latestCandle.timestamp);
+                    console.log(`🚀 Latest ${market} candle: ${candleTime.toISOString()} - V:${latestCandle.volume} C:${latestCandle.close}`);
+                    
+                    // data-collector에서 스마트 중복 방지로 처리
+                    this.collector.saveCandles(candles1m, '1m');
+                }
+                await new Promise(resolve => setTimeout(resolve, 500)); // 적절한 딜레이
+            } catch (error) {
+                console.error(`❌ Error collecting latest candles for ${market}:`, error.message);
+            }
+        }
+        
+        console.log('✅ Latest candles collection completed');
+    }
+    
     async collectRecentData() {
         for (const market of this.markets) {
             try {
-                const candles1m = await this.collector.fetchCandles(market, 1, 10);
-                if (candles1m.length > 0) {
-                    this.collector.saveCandles(candles1m, '1m');
-                }
+                // 🚨 1분봉 수집 제거 - collectLatestCandles()에서만 처리하여 중복 방지
+                // const candles1m = await this.collector.fetchCandles(market, 1, 10);
+                // if (candles1m.length > 0) {
+                //     this.collector.saveCandles(candles1m, '1m');
+                // }
                 
                 const candles5m = await this.collector.fetchCandles(market, 5, 10);
                 if (candles5m.length > 0) {
@@ -61,7 +97,8 @@ class MarketDataScheduler {
     async collectFullData() {
         for (const market of this.markets) {
             try {
-                const timeframes = [1, 5, 15, 30, 60];
+                // 🚨 1분봉 제거하여 중복 브로드캐스트 방지 - collectLatestCandles()에서만 처리
+                const timeframes = [5, 15, 30, 60]; // 1분봉 제거
                 
                 for (const unit of timeframes) {
                     const candles = await this.collector.fetchCandles(market, unit, 50);

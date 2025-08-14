@@ -23,9 +23,10 @@
       "Bash(git add:*)",
       "Bash(copy history.js history_backup.js)",
       "Bash(cp:*)",
-      "Bash(start http://localhost:3000/history.html)",
-      "Bash(start http://localhost:3000/)"
+      "Bash(sqlite3:*)",
+      "Bash(node server.js)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

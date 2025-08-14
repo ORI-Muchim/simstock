@@ -27,6 +27,7 @@ let candleData = []; // Store candle data
 let avgPriceLine = null; // Average price line
 let leveragePositionLines = []; // Store leverage position lines on chart
 let chartInitialized = false; // Track chart initialization state
+let volumeDataLoaded = false; // 볼륨 데이터 초기 로딩 완료 플래그
 let indicators = {
     ma: null,
     ema: null,
@@ -384,8 +385,17 @@ function selectMarket(market) {
         switchPage('trade');
     }
     
+    // Reset indicator button states
+    document.querySelectorAll('.indicator-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
     // Reset chart initialization state and reload chart with new market data
     chartInitialized = false;
+    
+    // 🚨 마켓 변경 시 볼륨 데이터 플래그 리셋
+    volumeDataLoaded = false;
+    
     if (typeof loadCandles === 'function') {
         loadCandles(currentInterval);
     }
@@ -400,6 +410,13 @@ function selectMarket(market) {
     
     // Update UI including spot profit display for the new market
     updateUI();
+    
+    // Load chart settings for the new market
+    if (chartInitialized) {
+        setTimeout(() => {
+            loadChartSettings();
+        }, 500);
+    }
 }
 
 // Check if user is logged in
@@ -693,6 +710,8 @@ async function saveUserData() {
     }
 }
 
+// 🚫 REMOVED: Force volume update - OKX API에서만 거래량 가져오기
+
 // WebSocket connection
 function initializeWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -700,12 +719,33 @@ function initializeWebSocket() {
     ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('🔗 WebSocket connected successfully');
         // showToast('Connected to server', 'success');
     };
     
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        
+        // 🚨 ENHANCED DEBUG: 모든 WebSocket 메시지 상세 로깅
+        const timestamp = new Date().toISOString().slice(11, 19);
+        if (data.type === 'candle_update') {
+            console.log(`🎯🎯🎯 [${timestamp}] CANDLE_UPDATE RECEIVED!`, {
+                instId: data.instId,
+                interval: data.interval,
+                volume: data.data?.volume,
+                close: data.data?.close,
+                time: data.data?.time,
+                currentMarket,
+                currentInterval,
+                chartInitialized,
+                candleSeriesExists: !!candleSeries,
+                volumeSeriesExists: !!volumeSeries,
+                candleDataLength: candleData?.length
+            });
+        } else {
+            console.log(`📨 [${timestamp}] WS:`, data.type, data.instId || '');
+        }
+        
         switch(data.type) {
             case 'price_update':
                 if (data.instId) {
@@ -733,8 +773,35 @@ function initializeWebSocket() {
             case 'candle_update':
                 if (data.instId) {
                     const market = data.instId.replace('-', '/');
-                    if (market === currentMarket && data.interval === currentInterval) {
+                    console.log('📊 Received candle_update:', {
+                        market,
+                        currentMarket,
+                        interval: data.interval,
+                        currentInterval,
+                        volume: data.data?.volume,
+                        marketMatch: market === currentMarket,
+                        intervalMatch: data.interval === currentInterval,
+                        shouldUpdate: data.interval === '1m' || (market === currentMarket && data.interval === currentInterval),
+                        data: data.data
+                    });
+                    
+                    // 🚨 VOLUME FIX: Update 1m candles ONLY for current market
+                    // This ensures volume displays correctly for the current market only
+                    if (market === currentMarket && data.interval === '1m' && data.data && data.data.volume !== undefined) {
+                        console.log('🔥 UPDATING 1m volume for CURRENT market:', data.data.volume, 'market:', market);
                         updateRealtimeCandleData(data.data);
+                    }
+                    // Also update if it exactly matches current market and interval (other timeframes)
+                    else if (market === currentMarket && data.interval === currentInterval) {
+                        console.log('📊 Updating chart with candle_update (exact match)');
+                        updateRealtimeCandleData(data.data);
+                    } else {
+                        console.log('📊 Skipping candle_update (different market/interval)', {
+                            receivedMarket: market,
+                            currentMarket: currentMarket,
+                            receivedInterval: data.interval,
+                            currentInterval: currentInterval
+                        });
                     }
                 }
                 break;
@@ -747,7 +814,7 @@ function initializeWebSocket() {
     };
     
     ws.onclose = () => {
-        console.log('WebSocket disconnected');
+        console.log('❌ WebSocket disconnected');
         showToast('Server disconnected. Reconnecting...', 'info');
         setTimeout(initializeWebSocket, 5000);
     };
@@ -842,6 +909,8 @@ function initializeTradingViewChart() {
             },
             priceScaleId: 'volume',
         });
+        
+        console.log('📊 Volume series created:', !!volumeSeries);
         
         // Configure volume scale
         chart.priceScale('volume').applyOptions({
@@ -1011,13 +1080,20 @@ function setupEventListeners() {
             const indicator = e.target.closest('.indicator-btn').dataset.indicator;
             const button = e.target.closest('.indicator-btn');
             
-            // Toggle active state
-            button.classList.toggle('active');
+            // Check current state
+            const wasActive = button.classList.contains('active');
+            const shouldActivate = !wasActive;
+            
+            console.log(`Toggling ${indicator}: ${wasActive} -> ${shouldActivate}`);
             
             // Toggle indicator
-            const isActive = button.classList.contains('active');
-            toggleIndicator(indicator, isActive);
-            // showToast(`${indicator.toUpperCase()} ${isActive ? 'enabled' : 'disabled'}`, 'info');
+            toggleIndicator(indicator, shouldActivate);
+            
+            // Update button states and save settings
+            setTimeout(() => {
+                updateIndicatorButtonStates();
+                debouncedSaveChartSettings();
+            }, 100);
         });
     });
     
@@ -1133,10 +1209,27 @@ function updatePrice(data) {
         document.getElementById('low-price').textContent = '$' + data.low_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
     if (data.volume) {
-        document.getElementById('volume').textContent = data.volume.toFixed(4) + ' BTC';
+        const volumeElement = document.getElementById('volume');
+        if (volumeElement) {
+            // Format volume with appropriate decimal places (24h USDT volume)
+            let formattedVolume;
+            if (data.volume >= 1000000) {
+                formattedVolume = '$' + (data.volume / 1000000).toFixed(1) + 'M';
+            } else if (data.volume >= 1000) {
+                formattedVolume = '$' + (data.volume / 1000).toFixed(1) + 'K';
+            } else {
+                formattedVolume = '$' + data.volume.toFixed(0);
+            }
+            volumeElement.textContent = formattedVolume;
+            console.log('📊 Updated 24h volume display:', formattedVolume, 'from raw:', data.volume);
+        }
+        
+        // 24시간 거래량으로 1분봉 볼륨을 추정하는 것은 잘못된 접근
+        // 실제 1분봉 캔들 데이터나 실시간 거래 데이터가 필요함
     }
     
-    // Update real-time candle
+    // Update real-time candle with price only
+    // Volume updates come exclusively from candle_update WebSocket messages
     updateRealtimeCandle(currentPrice);
     
     // Update leverage positions P&L
@@ -1313,13 +1406,42 @@ async function loadCandles(interval) {
                        high >= low && high >= open && high >= close &&
                        low <= open && low <= close;
             })
-            .map(candle => ({
-                time: candle.time,
-                open: parseFloat(candle.open),
-                high: parseFloat(candle.high),
-                low: parseFloat(candle.low),
-                close: parseFloat(candle.close)
-            }));
+            .map(candle => {
+                // 🚨 할머니 안전을 위한 강력한 타임스탬프 변환 (차트 로딩 시에도)
+                let timeAsNumber;
+                const rawTime = candle.time;
+                
+                if (typeof rawTime === 'number') {
+                    timeAsNumber = rawTime;
+                } else if (typeof rawTime === 'string') {
+                    timeAsNumber = parseInt(rawTime, 10);
+                } else if (rawTime && typeof rawTime === 'object') {
+                    if (rawTime.valueOf && typeof rawTime.valueOf === 'function') {
+                        timeAsNumber = parseInt(rawTime.valueOf(), 10);
+                    } else if (rawTime.toString) {
+                        const timeStr = rawTime.toString();
+                        timeAsNumber = parseInt(timeStr.replace(/[^\d]/g, ''), 10);
+                    } else {
+                        timeAsNumber = Math.floor(Date.now() / 1000);
+                    }
+                } else {
+                    timeAsNumber = Math.floor(Date.now() / 1000);
+                }
+                
+                if (isNaN(timeAsNumber) || timeAsNumber <= 0) {
+                    console.warn('🚨 Invalid timestamp in chart data, using current time:', rawTime);
+                    timeAsNumber = Math.floor(Date.now() / 1000);
+                }
+                
+                return {
+                    time: timeAsNumber,
+                    open: parseFloat(candle.open),
+                    high: parseFloat(candle.high),
+                    low: parseFloat(candle.low),
+                    close: parseFloat(candle.close),
+                    volume: (parseFloat(candle.volume) || 0) // 서버에서 이미 스케일링됨
+                };
+            });
         
         if (usdCandles.length === 0) {
             console.error('No valid candle data received after filtering');
@@ -1351,7 +1473,8 @@ async function loadCandles(interval) {
                     open: Number(candle.open.toFixed(2)),
                     high: Number(candle.high.toFixed(2)),
                     low: Number(candle.low.toFixed(2)),
-                    close: Number(candle.close.toFixed(2))
+                    close: Number(candle.close.toFixed(2)),
+                    volume: parseFloat(candle.volume) || 0
                 }))
                 .sort((a, b) => a.time - b.time);  // Sort in ascending order by time
             
@@ -1427,29 +1550,64 @@ async function loadCandles(interval) {
             }
         }
         
-        // Set volume data - use same filtered candles and validate volume
+        // 🚀 전문 트레이딩 거래량 표시 로직
+        // 1. 평균 거래량 계산 (최근 20개 캔들 기준)
+        const recentVolumes = safeCandles.slice(-20).map(c => c.volume || 0);
+        const avgVolume = recentVolumes.reduce((sum, vol) => sum + vol, 0) / recentVolumes.length;
+        
         const volumeData = safeCandles
-            .map(candle => {
-                // Find corresponding volume from original candles
-                const originalCandle = candles.find(c => c.time === candle.time);
-                const volumeValue = originalCandle && originalCandle.volume 
-                    ? parseFloat(originalCandle.volume) 
-                    : 0;
-                    
+            .map((candle, index) => {
+                const volumeValue = candle.volume || 0;
+                const relativeVolume = avgVolume > 0 ? volumeValue / avgVolume : 1;
+                
+                // 전문 트레이딩 색상 로직:
+                // - 상승 + 높은 거래량: 밝은 초록 (강한 매수)
+                // - 상승 + 낮은 거래량: 어두운 초록 (약한 매수) 
+                // - 하락 + 높은 거래량: 밝은 빨강 (강한 매도)
+                // - 하락 + 낮은 거래량: 어두운 빨강 (약한 매도)
+                const isUp = candle.close >= candle.open;
+                const isHighVolume = relativeVolume > 1.5; // 평균 대비 150% 이상
+                
+                let color;
+                if (isUp) {
+                    color = isHighVolume ? '#00ff88' : '#00a05c'; // 밝은/어두운 초록
+                } else {
+                    color = isHighVolume ? '#ff4444' : '#cc2222'; // 밝은/어두운 빨강
+                }
+                
                 return {
                     time: candle.time,
                     value: Number.isFinite(volumeValue) && volumeValue >= 0 ? volumeValue : 0,
-                    color: candle.close >= candle.open ? '#3fb950' : '#f85149'
+                    color: color,
+                    // 추가 메타데이터 (디버깅용)
+                    relativeVolume: relativeVolume,
+                    isHighVolume: isHighVolume
                 };
             })
             .filter(vol => vol && vol.time && Number.isFinite(vol.value) && vol.value >= 0);
         
+        console.log(`📊 Professional volume analysis: Avg=${avgVolume.toFixed(2)}, High volume bars=${volumeData.filter(v => v.isHighVolume).length}/${volumeData.length}`);
+        
         if (volumeSeries && volumeData && volumeData.length > 0) {
             try {
-                volumeSeries.setData(volumeData);
+                // 🚨 CRITICAL FIX: 처음 로딩할 때만 setData 사용, 이후에는 실시간 업데이트 보존
+                if (!volumeDataLoaded) {
+                    console.log('📊 Setting initial volume data:', volumeData.length, 'points');
+                    volumeSeries.setData(volumeData);
+                    volumeDataLoaded = true;
+                    console.log('✅ Initial volume data loaded');
+                } else {
+                    console.log('⚠️ Volume data already loaded, skipping setData to preserve real-time updates');
+                }
+                
             } catch (error) {
                 console.error('Error setting volume data:', error);
             }
+        } else {
+            console.warn('⚠️ Volume data not set:', {
+                volumeSeries: !!volumeSeries,
+                volumeDataLength: volumeData ? volumeData.length : 0
+            });
         }
         
         // Fit content
@@ -1459,8 +1617,18 @@ async function loadCandles(interval) {
         updateAveragePriceLine();
         updateLeveragePositionLines();
         
+        // Reset indicator button states before loading settings
+        document.querySelectorAll('.indicator-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
         // Mark chart as fully initialized
         chartInitialized = true;
+        
+        // Load saved chart settings
+        setTimeout(() => {
+            loadChartSettings();
+        }, 300);
         
         console.log('✅ Historical candles loaded successfully from database');
     } catch (error) {
@@ -1469,11 +1637,95 @@ async function loadCandles(interval) {
     }
 }
 
+// 🚨 차트 데이터 복구 함수 (할머니 안전 보장)
+function repairChartData() {
+    try {
+        console.log('🔧 Starting chart data repair...');
+        
+        if (!candleData || candleData.length === 0) {
+            console.log('🔧 No candleData to repair');
+            return;
+        }
+        
+        // 모든 캔들 데이터의 time을 강제로 숫자로 변환
+        const repairedData = candleData.map((candle, index) => {
+            let timeAsNumber;
+            const rawTime = candle.time;
+            
+            if (typeof rawTime === 'number') {
+                timeAsNumber = rawTime;
+            } else if (typeof rawTime === 'string') {
+                timeAsNumber = parseInt(rawTime, 10);
+            } else if (rawTime && typeof rawTime === 'object') {
+                if (rawTime.valueOf && typeof rawTime.valueOf === 'function') {
+                    timeAsNumber = parseInt(rawTime.valueOf(), 10);
+                } else {
+                    timeAsNumber = Math.floor(Date.now() / 1000) - (candleData.length - index) * 60;
+                }
+            } else {
+                timeAsNumber = Math.floor(Date.now() / 1000) - (candleData.length - index) * 60;
+            }
+            
+            if (isNaN(timeAsNumber) || timeAsNumber <= 0) {
+                timeAsNumber = Math.floor(Date.now() / 1000) - (candleData.length - index) * 60;
+            }
+            
+            return {
+                time: timeAsNumber,
+                open: parseFloat(candle.open) || 0,
+                high: parseFloat(candle.high) || 0,
+                low: parseFloat(candle.low) || 0,
+                close: parseFloat(candle.close) || 0,
+                volume: parseFloat(candle.volume) || 0
+            };
+        });
+        
+        // 시간 순서대로 정렬
+        repairedData.sort((a, b) => a.time - b.time);
+        
+        // 차트 데이터 교체
+        candleData = repairedData;
+        
+        // 차트 시리즈 데이터 완전 재설정
+        if (candleSeries && repairedData.length > 0) {
+            candleSeries.setData(repairedData);
+            console.log('🔧 Chart data repaired successfully');
+        }
+        
+        // 볼륨 데이터도 재설정
+        if (volumeSeries && repairedData.length > 0) {
+            const volumeData = repairedData.map(candle => ({
+                time: candle.time,
+                value: candle.volume,
+                color: candle.close >= candle.open ? '#00d68f' : '#ff5a5f'
+            }));
+            volumeSeries.setData(volumeData);
+            console.log('🔧 Volume data repaired successfully');
+        }
+        
+    } catch (error) {
+        console.error('🔧 Chart repair failed:', error);
+    }
+}
+
 // Update real-time candle data from WebSocket
 function updateRealtimeCandleData(newCandleData) {
+    const funcTimestamp = new Date().toISOString().slice(11, 19);
+    console.log(`🚨 [${funcTimestamp}] updateRealtimeCandleData STARTED`, {
+        hasNewData: !!newCandleData,
+        volume: newCandleData?.volume,
+        close: newCandleData?.close,
+        time: newCandleData?.time
+    });
+    
     try {
         if (!chartInitialized || !candleSeries || !chart || !candleData || candleData.length === 0) {
-            console.log('⏳ Chart not ready for real-time WebSocket candle updates');
+            console.log(`❌ [${funcTimestamp}] Chart not ready for real-time updates:`, {
+                chartInitialized,
+                hasCandleSeries: !!candleSeries,
+                hasChart: !!chart,
+                candleDataLength: candleData?.length
+            });
             return;
         }
         
@@ -1482,61 +1734,353 @@ function updateRealtimeCandleData(newCandleData) {
             return;
         }
         
+        // 🚨 할머니 안전을 위한 강력한 타임스탬프 변환
+        const rawTime = newCandleData.time;
+        let timeAsNumber;
+        
+        if (typeof rawTime === 'number') {
+            timeAsNumber = rawTime;
+        } else if (typeof rawTime === 'string') {
+            timeAsNumber = parseInt(rawTime, 10);
+        } else if (rawTime && typeof rawTime === 'object') {
+            // 객체인 경우 다양한 방법으로 숫자 추출 시도
+            if (rawTime.valueOf && typeof rawTime.valueOf === 'function') {
+                timeAsNumber = parseInt(rawTime.valueOf(), 10);
+            } else if (rawTime.toString) {
+                const timeStr = rawTime.toString();
+                timeAsNumber = parseInt(timeStr.replace(/[^\d]/g, ''), 10);
+            } else {
+                timeAsNumber = Math.floor(Date.now() / 1000);
+            }
+        } else {
+            timeAsNumber = Math.floor(Date.now() / 1000);
+        }
+        
+        // 마지막 검증: NaN이거나 비정상적인 값이면 현재 시간 사용
+        if (isNaN(timeAsNumber) || timeAsNumber <= 0) {
+            console.warn('🚨 Invalid timestamp detected, using current time:', rawTime);
+            timeAsNumber = Math.floor(Date.now() / 1000);
+        }
+        
         const newCandle = {
-            time: newCandleData.time,
-            open: newCandleData.open,
-            high: newCandleData.high,
-            low: newCandleData.low,
-            close: newCandleData.close,
-            volume: newCandleData.volume
+            time: timeAsNumber,
+            open: parseFloat(newCandleData.open) || 0,
+            high: parseFloat(newCandleData.high) || 0,
+            low: parseFloat(newCandleData.low) || 0,
+            close: parseFloat(newCandleData.close) || 0,
+            volume: parseFloat(newCandleData.volume) || 0
         };
         
         console.log('⚡ Real-time candle update via WebSocket:', newCandle);
+        console.log('📊 Volume value:', newCandle.volume, typeof newCandle.volume);
+        console.log('🔍 volumeSeries status:', !!volumeSeries, typeof volumeSeries);
+        console.log('🕐 Time values check:', {
+            newTime: newCandle.time,
+            newTimeType: typeof newCandle.time,
+            rawTime: newCandleData.time,
+            rawTimeType: typeof newCandleData.time
+        });
+        
+        // Debug volume validation
+        if (!newCandle.volume || newCandle.volume === 0) {
+            console.warn('🚨 Volume is zero or undefined!', {
+                volume: newCandle.volume,
+                rawData: newCandleData
+            });
+        }
         
         // Get the last candle from our stored data
         const lastStoredCandle = candleData[candleData.length - 1];
         
-        if (lastStoredCandle && lastStoredCandle.time === newCandle.time) {
-            // Update existing candle (same time period)
-            candleData[candleData.length - 1] = newCandle;
-            candleSeries.update(newCandle);
-            
-            // Update line chart if active
-            if (currentChartType === 'line' && lineSeries) {
-                lineSeries.update({
-                    time: newCandle.time,
-                    value: newCandle.close
-                });
-            }
-        } else if (!lastStoredCandle || newCandle.time > lastStoredCandle.time) {
-            // Add new candle (new time period)
+        // 🚨 할머니 안전을 위한 중요한 시간 분석
+        const intervalSeconds = getIntervalSeconds(currentInterval) || 60;
+        const isNewCandle = !lastStoredCandle || (newCandle.time >= lastStoredCandle.time + intervalSeconds);
+        
+        console.log('🔍 Candle comparison:', {
+            newCandleTime: newCandle.time,
+            lastStoredTime: lastStoredCandle?.time,
+            timeDiff: lastStoredCandle ? newCandle.time - lastStoredCandle.time : 'no last candle',
+            intervalSeconds: intervalSeconds,
+            isNewCandle: isNewCandle,
+            newVolume: newCandle.volume,
+            lastVolume: lastStoredCandle?.volume
+        });
+        
+        // 🚨 할머니 안전 보장: 새로운 캔들 vs 기존 캔들 업데이트 구분
+        let candleToUpdate = null;
+        let candleIndex = -1;
+        
+        if (isNewCandle) {
+            // 새로운 1분봉 시작 - 새 캔들 추가
+            console.log('🆕 NEW CANDLE detected - adding to chart');
             candleData.push(newCandle);
-            candleSeries.update(newCandle);
+            candleIndex = candleData.length - 1;
+            candleToUpdate = newCandle;
+        } else {
+            // 기존 1분봉 업데이트 - 기존 캔들 수정
+            console.log('📝 UPDATE existing candle');
+            // Look for exact timestamp match first (within last 5 candles)
+            for (let i = candleData.length - 1; i >= Math.max(0, candleData.length - 5); i--) {
+                if (candleData[i].time === newCandle.time) {
+                    candleToUpdate = candleData[i];
+                    candleIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        // If no exact match but new candle is recent (within 3 intervals), update the latest candle
+        if (!candleToUpdate && lastStoredCandle) {
+            const timeDiffSeconds = Math.abs(newCandle.time - lastStoredCandle.time);
+            const intervalSeconds = getIntervalSeconds(currentInterval) || 60; // default 1 minute
+            
+            // 🚨 VOLUME FIX: More lenient time matching for volume updates
+            // If within 3 intervals (e.g., 3 minutes for 1m chart), update latest candle
+            if (timeDiffSeconds <= intervalSeconds * 3) {
+                candleToUpdate = lastStoredCandle;
+                candleIndex = candleData.length - 1;
+                console.log(`📝 Updating recent candle (time diff: ${timeDiffSeconds}s, interval: ${intervalSeconds}s)`);
+            }
+        }
+        
+        // 🚨 EMERGENCY VOLUME UPDATE: If still no match, force update the last candle for critical volume data
+        if (!candleToUpdate && lastStoredCandle && newCandle.volume && newCandle.volume > 0) {
+            console.log('🚨 EMERGENCY: Force updating last candle volume from', lastStoredCandle.volume, 'to', newCandle.volume);
+            candleToUpdate = lastStoredCandle;
+            candleIndex = candleData.length - 1;
+            // Use the last stored candle's time but new volume
+            newCandle.time = lastStoredCandle.time;
+            newCandle.open = lastStoredCandle.open;
+            newCandle.high = Math.max(lastStoredCandle.high, newCandle.high || lastStoredCandle.high);
+            newCandle.low = Math.min(lastStoredCandle.low, newCandle.low || lastStoredCandle.low);
+            newCandle.close = newCandle.close || lastStoredCandle.close;
+        }
+        
+        if (candleToUpdate) {
+            // Update candle data array
+            candleData[candleIndex] = newCandle;
+            
+            try {
+                // 🚨 CRITICAL FIX: Create 100% safe object for TradingView
+                const safeCandle = {
+                    time: Number(newCandle.time),      // Force pure number conversion
+                    open: Number(newCandle.open),      // Force pure number conversion
+                    high: Number(newCandle.high),      // Force pure number conversion
+                    low: Number(newCandle.low),        // Force pure number conversion
+                    close: Number(newCandle.close)     // Force pure number conversion
+                };
+                
+                // 🚨 Final validation - ensure all values are clean numbers
+                if (!Number.isFinite(safeCandle.time) || safeCandle.time <= 0) {
+                    throw new Error(`Invalid timestamp after conversion: ${safeCandle.time} (original: ${newCandle.time})`);
+                }
+                
+                console.log('🛡️ Safe candle for TradingView:', {
+                    time: safeCandle.time,
+                    timeType: typeof safeCandle.time,
+                    isFinite: Number.isFinite(safeCandle.time),
+                    original: newCandle.time,
+                    originalType: typeof newCandle.time
+                });
+                
+                // 🚨 ULTIMATE FIX: Always use update() to avoid ALL time ordering issues
+                console.log('🛡️ Using SAFE update method for TradingView chart');
+                console.log('🛡️ Safe candle final check:', {
+                    time: safeCandle.time,
+                    type: typeof safeCandle.time,
+                    isFinite: Number.isFinite(safeCandle.time),
+                    toString: safeCandle.time.toString()
+                });
+                
+                candleSeries.update(safeCandle);
+                console.log('✅ Candle series updated successfully with safe data');
+            } catch (error) {
+                console.warn('⚠️ Could not update candle series:', error.message);
+                console.warn('⚠️ Problematic candle data:', newCandle);
+                
+                // 🚨 차트 데이터가 꼬였을 때 복구 시도
+                if (error.message.includes('Cannot update oldest data') || 
+                    error.message.includes('time') ||
+                    error.message.includes('object Object')) {
+                    console.log('🔧 CRITICAL: Attempting emergency chart data repair...');
+                    console.log('🔧 Error details:', {
+                        message: error.message,
+                        candleTime: safeCandle.time,
+                        candleTimeType: typeof safeCandle.time
+                    });
+                    
+                    // Emergency: Try to convert to clean integer
+                    try {
+                        const emergencyCandle = {
+                            time: Math.floor(Number(safeCandle.time)),
+                            open: Number(safeCandle.open),
+                            high: Number(safeCandle.high),
+                            low: Number(safeCandle.low),
+                            close: Number(safeCandle.close)
+                        };
+                        console.log('🚨 Emergency candle conversion:', emergencyCandle);
+                        candleSeries.update(emergencyCandle);
+                        console.log('✅ Emergency update successful!');
+                    } catch (emergencyError) {
+                        console.error('❌ Emergency update also failed:', emergencyError.message);
+                        repairChartData();
+                    }
+                }
+            }
+            
+            // Update volume if series exists OR recreate it
+            if (!volumeSeries && chart) {
+                console.warn('⚠️ Volume series missing, recreating...');
+                try {
+                    volumeSeries = chart.addHistogramSeries({
+                        color: '#00c087',
+                        priceFormat: {
+                            type: 'volume',
+                        },
+                        priceScaleId: 'volume',
+                        scaleMargins: {
+                            top: 0.7,
+                            bottom: 0,
+                        },
+                    });
+                    console.log('✅ Volume series recreated');
+                } catch (e) {
+                    console.error('Failed to recreate volume series:', e);
+                }
+            }
+            
+            if (volumeSeries) {
+                // For older candles, find the matching time or use the most recent candle time
+                let volumeTime = newCandle.time;
+                
+                // If the candle time is older than our last candle, use the last candle time instead
+                if (lastStoredCandle && newCandle.time < lastStoredCandle.time) {
+                    volumeTime = lastStoredCandle.time;
+                    console.log(`🔄 Using latest candle time ${volumeTime} instead of ${newCandle.time} for volume update`);
+                }
+                
+                // 🚀 전문 트레이딩 실시간 볼륨 분석
+                // 최근 20개 캔들의 평균 거래량 계산
+                const recentCandles = candleData.slice(-20);
+                const avgVolume = recentCandles.length > 0 ? 
+                    recentCandles.reduce((sum, c) => sum + (c.volume || 0), 0) / recentCandles.length : 
+                    newCandle.volume || 1;
+                
+                const relativeVolume = avgVolume > 0 ? (newCandle.volume || 0) / avgVolume : 1;
+                const isUp = newCandle.close >= newCandle.open;
+                const isHighVolume = relativeVolume > 1.5; // 평균 대비 150% 이상
+                
+                // 전문 트레이딩 색상 적용
+                let color;
+                if (isUp) {
+                    color = isHighVolume ? '#00ff88' : '#00a05c'; // 강한/약한 매수
+                } else {
+                    color = isHighVolume ? '#ff4444' : '#cc2222'; // 강한/약한 매도
+                }
+                
+                const volumeUpdate = {
+                    time: Number(volumeTime), // 🚨 CRITICAL FIX: Force pure number conversion
+                    value: Number(newCandle.volume) || 0,
+                    color: color
+                };
+                
+                console.log('🚀 Professional volume update:', {
+                    ...volumeUpdate,
+                    relativeVolume: relativeVolume.toFixed(2),
+                    isHighVolume,
+                    trend: isUp ? 'UP' : 'DOWN'
+                });
+                
+                try {
+                    // 🚨 ULTIMATE FIX: Always use update() for volume to avoid time issues
+                    console.log('🛡️ Using SAFE update method for volume chart');
+                    console.log('🛡️ Volume update final check:', {
+                        time: volumeUpdate.time,
+                        type: typeof volumeUpdate.time,
+                        isFinite: Number.isFinite(volumeUpdate.time),
+                        value: volumeUpdate.value
+                    });
+                    
+                    volumeSeries.update(volumeUpdate);
+                    console.log('✅ Professional volume updated successfully');
+                } catch (e) {
+                    console.error('❌ Failed to update volume:', e);
+                }
+            } else {
+                console.warn('⚠️ Volume series still not available');
+            }
             
             // Update line chart if active
             if (currentChartType === 'line' && lineSeries) {
-                lineSeries.update({
-                    time: newCandle.time,
-                    value: newCandle.close
-                });
+                const lineData = { 
+                    time: Number(newCandle.time), // 🚨 CRITICAL FIX: Force pure number conversion
+                    value: Number(newCandle.close) 
+                };
+                try {
+                    // 🚨 ULTIMATE FIX: Always use update() for line chart
+                    console.log('🛡️ Using SAFE update method for line chart');
+                    lineSeries.update(lineData);
+                    console.log('✅ Line chart updated successfully');
+                } catch (e) {
+                    console.error('❌ Failed to update line chart:', e);
+                }
+            }
+        } else {
+            // Log when candle is ignored (too old or doesn't match criteria)
+            console.log(`🔍 Candle not processed - timestamp: ${newCandle.time}, lastStored: ${lastStoredCandle?.time}`);
+            
+            // Force update the most recent candle if volume is significantly different
+            if (lastStoredCandle && Math.abs(newCandle.volume - lastStoredCandle.volume) > 0.01) {
+                console.log(`🔄 Force updating volume due to significant change: ${lastStoredCandle.volume} → ${newCandle.volume}`);
+                
+                // Update the volume of the most recent candle with professional logic
+                if (volumeSeries) {
+                    // 전문 트레이딩 볼륨 분석 적용
+                    const recentCandles = candleData.slice(-20);
+                    const avgVolume = recentCandles.length > 0 ? 
+                        recentCandles.reduce((sum, c) => sum + (c.volume || 0), 0) / recentCandles.length : 
+                        newCandle.volume || 1;
+                    
+                    const relativeVolume = avgVolume > 0 ? (newCandle.volume || 0) / avgVolume : 1;
+                    const isUp = newCandle.close >= newCandle.open;
+                    const isHighVolume = relativeVolume > 1.5;
+                    
+                    let color;
+                    if (isUp) {
+                        color = isHighVolume ? '#00ff88' : '#00a05c';
+                    } else {
+                        color = isHighVolume ? '#ff4444' : '#cc2222';
+                    }
+                    
+                    const volumeUpdate = {
+                        time: parseInt(lastStoredCandle.time), // Ensure it's an integer
+                        value: parseFloat(newCandle.volume) || 0,
+                        color: color
+                    };
+                    
+                    try {
+                        volumeSeries.update(volumeUpdate);
+                        console.log('✅ Professional force volume update successful:', volumeUpdate.value);
+                    } catch (e) {
+                        console.error('❌ Force volume update failed:', e);
+                    }
+                }
             }
             
-            // Keep only recent candles to avoid memory issues
-            if (candleData.length > 2000) {
-                candleData.shift();
-                // Note: We don't remove from chart as it handles this automatically
-            }
+            return; // Skip adding new candle for old timestamps
         }
         
         // Update current price
         currentPrice = newCandle.close;
         
+        console.log(`✅ [${funcTimestamp}] updateRealtimeCandleData COMPLETED successfully`);
+        
     } catch (error) {
-        console.error('Error updating real-time candle:', error);
+        console.error(`❌ [${funcTimestamp}] Error updating real-time candle:`, error);
     }
 }
 
-// Update real-time candle (legacy function for price updates)
+// Update real-time candle (for price updates only - volume comes from candle_update)
 function updateRealtimeCandle(price) {
     try {
         if (!chartInitialized || !candleSeries || !chart || !candleData || candleData.length === 0) {
@@ -1562,6 +2106,7 @@ function updateRealtimeCandle(price) {
         const currentTimeUTC = Math.floor(Date.now() / 1000);
         
         // Calculate how much time has passed since last candle
+        // lastCandle.time is in seconds (TradingView format), convert to match currentTimeUTC
         const timeSinceLastCandle = currentTimeUTC - lastCandle.time;
         const intervalProgress = timeSinceLastCandle / intervalSeconds;
         
@@ -1582,19 +2127,20 @@ function updateRealtimeCandle(price) {
         }
         
         // Debug: Convert timestamps to readable dates
+        // lastCandle.time is already in seconds (TradingView format)
         const lastCandleDate = new Date(lastCandle.time * 1000).toISOString();
         const currentCandleDate = new Date(candleTime * 1000).toISOString();
         const nowDate = new Date().toISOString();
         
-        console.log('🕐 Candle time calculation debug:');
-        console.log('   Current real time:', nowDate);
-        console.log('   Last candle time:', lastCandle.time, '→', lastCandleDate);
-        console.log('   Calculated candle time:', candleTime, '→', currentCandleDate);
-        console.log('   Interval:', currentInterval);
-        console.log('   Price:', price);
-        console.log('   Time since last candle:', timeSinceLastCandle, 'seconds');
-        console.log('   Interval progress:', (intervalProgress * 100).toFixed(1) + '%');
-        console.log('   Should create new candle:', shouldCreateNewCandle);
+        // Only log debug info if there's an issue or when creating new candles
+        if (shouldCreateNewCandle || timeSinceLastCandle < 0) {
+            console.log('🕐 Candle time calculation debug:');
+            console.log('   Current real time:', nowDate);
+            console.log('   Last candle time:', lastCandle.time, '(seconds) →', lastCandleDate);
+            console.log('   Time since last candle:', timeSinceLastCandle, 'seconds');
+            console.log('   Interval progress:', (intervalProgress * 100).toFixed(1) + '%');
+            console.log('   Should create new candle:', shouldCreateNewCandle);
+        }
         
         // Check if we need to create a new candle or update existing one  
         if (shouldCreateNewCandle) {
@@ -1605,11 +2151,14 @@ function updateRealtimeCandle(price) {
                 open: price,
                 high: price,
                 low: price,
-                close: price
+                close: price,
+                volume: 0 // 🚫 거래량은 OKX API에서만 가져오기 - 0으로 초기화
             };
             
             candleData.push(newCandle);
             candleSeries.update(newCandle);
+            
+            // 🚫 거래량은 OKX API candle_update 메시지를 통해서만 업데이트
             
             // Update line chart if active
             if (currentChartType === 'line' && lineSeries) {
@@ -1661,12 +2210,14 @@ function updateRealtimeCandle(price) {
         }
         
         // Create a safe copy of the updated candle data
+        // Keep existing volume (don't accumulate from price updates)
         const updatedCandle = {
             time: Number(lastCandle.time),
             open: Number(parsedOpen),
             high: Number(Math.max(parsedHigh, parsedPrice)),
             low: Number(Math.min(parsedLow, parsedPrice)),
-            close: Number(parsedPrice)
+            close: Number(parsedPrice),
+            volume: lastCandle.volume || 0 // Keep existing volume
         };
         
         // Verify all values are valid numbers
@@ -1683,6 +2234,8 @@ function updateRealtimeCandle(price) {
         
         // Update the chart
         candleSeries.update(updatedCandle);
+        
+        // Don't update volume here - volume comes from candle_update WebSocket events
         
         // Update line chart if active
         if (currentChartType === 'line' && lineSeries) {
@@ -1758,12 +2311,14 @@ function switchTimeframe(interval) {
         }
         
         // Create a safe copy of the updated candle data
+        // Keep existing volume (don't accumulate from price updates)
         const updatedCandle = {
             time: Number(lastCandle.time),
             open: Number(parsedOpen),
             high: Number(Math.max(parsedHigh, parsedPrice)),
             low: Number(Math.min(parsedLow, parsedPrice)),
-            close: Number(parsedPrice)
+            close: Number(parsedPrice),
+            volume: lastCandle.volume || 0 // Keep existing volume
         };
         
         // Verify all values are valid numbers
@@ -1869,6 +2424,12 @@ function switchTimeframe(interval) {
 function switchTimeframe(interval) {
     currentInterval = interval;
     
+    // 🚨 시간프레임 변경 시 볼륨 데이터 플래그 리셋
+    volumeDataLoaded = false;
+    
+    // Clean up any legacy global volume tracking variables
+    cleanupVolumeTracking();
+    
     // Update button states (updated for new UI)
     document.querySelectorAll('.tf-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.interval === interval);
@@ -1877,6 +2438,17 @@ function switchTimeframe(interval) {
     // Reset chart initialization state and load new candle data
     chartInitialized = false;
     loadCandles(interval);
+}
+
+// Clean up legacy volume tracking variables
+function cleanupVolumeTracking() {
+    if (typeof window.lastVol24h !== 'undefined') {
+        delete window.lastVol24h;
+    }
+    if (typeof window.currentCandleVolume !== 'undefined') {
+        delete window.currentCandleVolume;
+    }
+    console.log('🧹 Cleaned up volume tracking variables');
 }
 
 // Switch chart bottom tabs
@@ -3183,6 +3755,10 @@ function toggleIndicator(indicator, isActive) {
             }
             break;
     }
+    
+    // Update button states
+    updateIndicatorButtonStates();
+    // Note: Saving is handled at the button click level
 }
 
 // Remove indicator
@@ -3223,6 +3799,10 @@ function removeIndicator(indicator) {
             }
             break;
     }
+    
+    // Update button states
+    updateIndicatorButtonStates();
+    // Note: Saving is handled at the button click level
 }
 
 // Calculate Simple Moving Average
@@ -3931,6 +4511,9 @@ function drawTrendLine(point1, point2, series) {
         series: targetSeries
     });
     
+    // Auto-save chart settings after drawing
+    debouncedSaveChartSettings();
+    
     console.log('Trend line created with', lines.length, 'segments');
     showToast(`Trend Line: ${direction} ${Math.abs(priceChangePercent).toFixed(2)}% (${point1.price.toFixed(2)} → ${point2.price.toFixed(2)})`, 'success');
 }
@@ -4009,6 +4592,9 @@ function drawFibonacciRetracement(point1, point2, series) {
         series: targetSeries
     });
     
+    // Auto-save chart settings after drawing
+    debouncedSaveChartSettings();
+    
     showToast(`Fibonacci Retracement: ${priceLow.toFixed(2)} - ${priceHigh.toFixed(2)}`, 'success');
 }
 
@@ -4032,6 +4618,9 @@ function drawHorizontalLine(price, series) {
         price: price,
         series: targetSeries
     });
+    
+    // Auto-save chart settings after drawing
+    debouncedSaveChartSettings();
     
     showToast(`Horizontal line drawn at $${price.toFixed(2)}`, 'success');
 }
@@ -4160,6 +4749,11 @@ function switchChartType(type) {
         toggleIndicator(indicator, true);
     });
     
+    // Update button states
+    setTimeout(() => {
+        updateIndicatorButtonStates();
+    }, 200);
+    
     // Re-add average price line if exists
     updateAveragePriceLine();
     
@@ -4226,4 +4820,172 @@ function redrawExistingDrawings() {
             drawFibonacciRetracement(drawing.point1, drawing.point2, currentSeries);
         }
     });
+}
+
+// Chart Settings Management
+async function saveChartSettings() {
+    const token = localStorage.getItem('token');
+    if (!token) {
+        console.log('❌ No token found, skipping save');
+        return;
+    }
+    console.log('💾 Saving chart settings for', currentMarket);
+
+    try {
+        // Get current indicator states (which ones are active)
+        const activeIndicators = {};
+        Object.keys(indicators).forEach(key => {
+            if (key === 'bollinger' && indicators[key]) {
+                // Bollinger bands - check if any of the lines exist
+                activeIndicators[key] = (indicators[key].upper !== null || 
+                                       indicators[key].middle !== null || 
+                                       indicators[key].lower !== null);
+            } else if (key === 'macd' && indicators[key]) {
+                // MACD - check if any of the lines exist
+                activeIndicators[key] = (indicators[key].macd !== null ||
+                                       indicators[key].signal !== null ||
+                                       indicators[key].histogram !== null);
+            } else {
+                // Simple indicators like MA, EMA, RSI
+                activeIndicators[key] = indicators[key] !== null && indicators[key] !== undefined;
+            }
+        });
+        
+        console.log('💾 Saving active indicators:', activeIndicators);
+
+        const response = await fetch('/api/chart/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                market: currentMarket,
+                indicators: activeIndicators,
+                indicatorSettings: indicatorSettings,
+                drawings: drawings,
+                chartType: currentChartType
+            })
+        });
+
+        if (!response.ok) {
+            console.warn('Failed to save chart settings');
+        }
+    } catch (error) {
+        console.error('Error saving chart settings:', error);
+    }
+}
+
+async function loadChartSettings() {
+    const token = localStorage.getItem('token');
+    if (!token) {
+        console.log('❌ No token found, skipping load');
+        return;
+    }
+    console.log('📥 Loading chart settings for', currentMarket);
+
+    try {
+        const response = await fetch(`/api/chart/settings/${encodeURIComponent(currentMarket)}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        console.log('Response status:', response.status);
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('📊 Loaded data:', data);
+            if (data.settings) {
+                const settings = data.settings;
+                console.log('Settings found:', settings);
+                
+                // Restore indicator settings
+                if (settings.indicator_settings) {
+                    Object.assign(indicatorSettings, settings.indicator_settings);
+                }
+                
+                // Restore drawings
+                if (settings.drawings && Array.isArray(settings.drawings)) {
+                    drawings.length = 0; // Clear existing drawings
+                    drawings.push(...settings.drawings);
+                    
+                    // Redraw all drawings on chart
+                    setTimeout(() => {
+                        if (typeof redrawAllDrawings === 'function') {
+                            redrawAllDrawings();
+                        }
+                    }, 100);
+                }
+                
+                // Restore chart type
+                if (settings.chart_type) {
+                    currentChartType = settings.chart_type;
+                }
+                
+                // Restore active indicators
+                if (settings.indicators) {
+                    for (const [indicatorName, isActive] of Object.entries(settings.indicators)) {
+                        if (isActive) {
+                            // Reactivate the indicator
+                            setTimeout(() => {
+                                toggleIndicator(indicatorName, true);
+                                // Update button states after indicator is applied
+                                setTimeout(() => {
+                                    updateIndicatorButtonStates();
+                                }, 100);
+                            }, 200);
+                        }
+                    }
+                }
+                
+                console.log('✅ Chart settings loaded successfully');
+            } else {
+                console.log('📊 No settings found in response');
+            }
+        } else if (response.status === 404) {
+            console.log('📊 No saved settings found for', currentMarket);
+        } else {
+            console.error('Failed to load chart settings:', response.status);
+        }
+    } catch (error) {
+        console.error('Error loading chart settings:', error);
+    }
+}
+
+// Debounced save function to prevent excessive API calls
+let saveTimeout;
+function debouncedSaveChartSettings() {
+    console.log('⏱️ Debounced save triggered');
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+        saveChartSettings();
+    }, 500); // Save after 500ms of inactivity
+}
+
+// Update indicator button states to match actual indicator states
+function updateIndicatorButtonStates() {
+    document.querySelectorAll('.indicator-btn').forEach(btn => {
+        const indicatorName = btn.dataset.indicator;
+        const isActive = isIndicatorActive(indicatorName);
+        btn.classList.toggle('active', isActive);
+    });
+}
+
+// Check if an indicator is currently active
+function isIndicatorActive(indicatorName) {
+    if (!indicators[indicatorName]) return false;
+    
+    switch (indicatorName) {
+        case 'bollinger':
+            return indicators[indicatorName].upper !== null || 
+                   indicators[indicatorName].middle !== null || 
+                   indicators[indicatorName].lower !== null;
+        case 'macd':
+            return indicators[indicatorName].macd !== null ||
+                   indicators[indicatorName].signal !== null ||
+                   indicators[indicatorName].histogram !== null;
+        default:
+            return indicators[indicatorName] !== null && indicators[indicatorName] !== undefined;
+    }
 }
