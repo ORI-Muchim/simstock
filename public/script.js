@@ -785,15 +785,24 @@ function initializeWebSocket() {
                         data: data.data
                     });
                     
-                    // 🚨 VOLUME FIX: Update 1m candles ONLY for current market
-                    // This ensures volume displays correctly for the current market only
-                    if (market === currentMarket && data.interval === '1m' && data.data && data.data.volume !== undefined) {
-                        console.log('🔥 UPDATING 1m volume for CURRENT market:', data.data.volume, 'market:', market);
-                        updateRealtimeCandleData(data.data);
+                    // Always update 1m candles for current market (for volume tracking)
+                    if (market === currentMarket && data.interval === '1m' && data.data) {
+                        console.log('🔥 Updating 1m candle for current market:', {
+                            market,
+                            volume: data.data.volume,
+                            close: data.data.close
+                        });
+                        // Store 1m data for volume reference
+                        if (currentInterval === '1m') {
+                            updateRealtimeCandleData(data.data);
+                        } else {
+                            // Still update volume for other intervals based on 1m data
+                            updateVolumeFromOneMinute(data.data);
+                        }
                     }
                     // Also update if it exactly matches current market and interval (other timeframes)
-                    else if (market === currentMarket && data.interval === currentInterval) {
-                        console.log('📊 Updating chart with candle_update (exact match)');
+                    else if (market === currentMarket && data.interval === currentInterval && data.data) {
+                        console.log('📊 Updating candle for current interval:', data.interval);
                         updateRealtimeCandleData(data.data);
                     } else {
                         console.log('📊 Skipping candle_update (different market/interval)', {
@@ -1590,16 +1599,10 @@ async function loadCandles(interval) {
         
         if (volumeSeries && volumeData && volumeData.length > 0) {
             try {
-                // 🚨 CRITICAL FIX: 처음 로딩할 때만 setData 사용, 이후에는 실시간 업데이트 보존
-                if (!volumeDataLoaded) {
-                    console.log('📊 Setting initial volume data:', volumeData.length, 'points');
-                    volumeSeries.setData(volumeData);
-                    volumeDataLoaded = true;
-                    console.log('✅ Initial volume data loaded');
-                } else {
-                    console.log('⚠️ Volume data already loaded, skipping setData to preserve real-time updates');
-                }
-                
+                console.log('📊 Setting volume data:', volumeData.length, 'points');
+                volumeSeries.setData(volumeData);
+                volumeDataLoaded = true;
+                console.log('✅ Volume data loaded');
             } catch (error) {
                 console.error('Error setting volume data:', error);
             }
@@ -1812,10 +1815,22 @@ function updateRealtimeCandleData(newCandleData) {
         
         if (isNewCandle) {
             // 새로운 1분봉 시작 - 새 캔들 추가
-            console.log('🆕 NEW CANDLE detected - adding to chart');
+            console.log('🆕 NEW CANDLE detected - adding to chart with volume:', newCandle.volume);
             candleData.push(newCandle);
             candleIndex = candleData.length - 1;
             candleToUpdate = newCandle;
+            
+            // 새 캔들의 볼륨도 즉시 추가
+            if (volumeSeries) {
+                const isUp = newCandle.close >= newCandle.open;
+                const volumeData = {
+                    time: newCandle.time,
+                    value: newCandle.volume || 0,
+                    color: isUp ? '#00d68f' : '#ff5a5f'
+                };
+                console.log('🆕 Adding new volume bar:', volumeData);
+                volumeSeries.update(volumeData);
+            }
         } else {
             // 기존 1분봉 업데이트 - 기존 캔들 수정
             console.log('📝 UPDATE existing candle');
@@ -1829,31 +1844,25 @@ function updateRealtimeCandleData(newCandleData) {
             }
         }
         
-        // If no exact match but new candle is recent (within 3 intervals), update the latest candle
+        // If no exact match, check if this is an update for the current (latest) candle
         if (!candleToUpdate && lastStoredCandle) {
             const timeDiffSeconds = Math.abs(newCandle.time - lastStoredCandle.time);
             const intervalSeconds = getIntervalSeconds(currentInterval) || 60; // default 1 minute
             
-            // 🚨 VOLUME FIX: More lenient time matching for volume updates
-            // If within 3 intervals (e.g., 3 minutes for 1m chart), update latest candle
-            if (timeDiffSeconds <= intervalSeconds * 3) {
+            // For real-time updates: if the new data is within the current interval period, update the last candle
+            // This ensures volume updates are applied to the current active candle
+            if (timeDiffSeconds <= intervalSeconds) {
                 candleToUpdate = lastStoredCandle;
                 candleIndex = candleData.length - 1;
-                console.log(`📝 Updating recent candle (time diff: ${timeDiffSeconds}s, interval: ${intervalSeconds}s)`);
+                // Preserve the existing candle time to maintain consistency
+                newCandle.time = lastStoredCandle.time;
+                // Merge OHLC values properly
+                newCandle.open = lastStoredCandle.open; // Keep original open
+                newCandle.high = Math.max(lastStoredCandle.high, newCandle.high);
+                newCandle.low = Math.min(lastStoredCandle.low, newCandle.low);
+                // Volume should be from the new data
+                console.log(`📝 Updating current candle with new volume: ${newCandle.volume} (time diff: ${timeDiffSeconds}s)`);
             }
-        }
-        
-        // 🚨 EMERGENCY VOLUME UPDATE: If still no match, force update the last candle for critical volume data
-        if (!candleToUpdate && lastStoredCandle && newCandle.volume && newCandle.volume > 0) {
-            console.log('🚨 EMERGENCY: Force updating last candle volume from', lastStoredCandle.volume, 'to', newCandle.volume);
-            candleToUpdate = lastStoredCandle;
-            candleIndex = candleData.length - 1;
-            // Use the last stored candle's time but new volume
-            newCandle.time = lastStoredCandle.time;
-            newCandle.open = lastStoredCandle.open;
-            newCandle.high = Math.max(lastStoredCandle.high, newCandle.high || lastStoredCandle.high);
-            newCandle.low = Math.min(lastStoredCandle.low, newCandle.low || lastStoredCandle.low);
-            newCandle.close = newCandle.close || lastStoredCandle.close;
         }
         
         if (candleToUpdate) {
@@ -1892,7 +1901,14 @@ function updateRealtimeCandleData(newCandleData) {
                     toString: safeCandle.time.toString()
                 });
                 
-                candleSeries.update(safeCandle);
+                // 새 캔들인 경우와 기존 캔들 업데이트 구분
+                if (isNewCandle) {
+                    console.log('📊 Adding new candle to series');
+                    candleSeries.update(safeCandle);
+                } else {
+                    console.log('📊 Updating existing candle in series');
+                    candleSeries.update(safeCandle);
+                }
                 console.log('✅ Candle series updated successfully with safe data');
             } catch (error) {
                 console.warn('⚠️ Could not update candle series:', error.message);
@@ -1949,15 +1965,10 @@ function updateRealtimeCandleData(newCandleData) {
                 }
             }
             
-            if (volumeSeries) {
-                // For older candles, find the matching time or use the most recent candle time
+            // 기존 캔들 업데이트 시에만 볼륨 업데이트 (새 캔들은 이미 위에서 처리함)
+            if (volumeSeries && !isNewCandle) {
+                // Use the exact candle time for volume update
                 let volumeTime = newCandle.time;
-                
-                // If the candle time is older than our last candle, use the last candle time instead
-                if (lastStoredCandle && newCandle.time < lastStoredCandle.time) {
-                    volumeTime = lastStoredCandle.time;
-                    console.log(`🔄 Using latest candle time ${volumeTime} instead of ${newCandle.time} for volume update`);
-                }
                 
                 // 🚀 전문 트레이딩 실시간 볼륨 분석
                 // 최근 20개 캔들의 평균 거래량 계산
@@ -1984,7 +1995,7 @@ function updateRealtimeCandleData(newCandleData) {
                     color: color
                 };
                 
-                console.log('🚀 Professional volume update:', {
+                console.log('🚀 Updating existing volume bar:', {
                     ...volumeUpdate,
                     relativeVolume: relativeVolume.toFixed(2),
                     isHighVolume,
@@ -2077,6 +2088,39 @@ function updateRealtimeCandleData(newCandleData) {
         
     } catch (error) {
         console.error(`❌ [${funcTimestamp}] Error updating real-time candle:`, error);
+    }
+}
+
+// Update volume from 1-minute candle data
+function updateVolumeFromOneMinute(oneMinuteData) {
+    try {
+        if (!volumeSeries || !candleData || candleData.length === 0) {
+            return;
+        }
+        
+        const lastCandle = candleData[candleData.length - 1];
+        if (!lastCandle) return;
+        
+        // Update volume for the current candle
+        const volumeValue = parseFloat(oneMinuteData.volume) || 0;
+        const isUp = lastCandle.close >= lastCandle.open;
+        
+        const volumeUpdate = {
+            time: lastCandle.time,
+            value: volumeValue,
+            color: isUp ? '#00d68f' : '#ff5a5f'
+        };
+        
+        console.log('📊 Updating volume from 1m data:', {
+            time: lastCandle.time,
+            volume: volumeValue,
+            currentInterval
+        });
+        
+        volumeSeries.update(volumeUpdate);
+        
+    } catch (error) {
+        console.error('Error updating volume from 1m data:', error);
     }
 }
 
