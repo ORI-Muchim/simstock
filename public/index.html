@@ -10,7 +10,7 @@
     <script>
         // Check authentication before loading
         if (!localStorage.getItem('token')) {
-            window.location.href = '/login.html';
+            window.location.href = '/login';
         }
     </script>
 </head>
@@ -24,9 +24,9 @@
                     <span>CryptoSim</span>
                 </div>
                 <div class="nav-menu">
-                    <a href="#" class="nav-item active" data-page="trade">Trade</a>
-                    <a href="#" class="nav-item" data-page="markets">Markets</a>
-                    <a href="#" class="nav-item" data-page="history">History</a>
+                    <a href="/" class="nav-item active" data-page="trade">Trade</a>
+                    <a href="/?page=markets" class="nav-item" data-page="markets">Markets</a>
+                    <a href="/history" class="nav-item" data-page="history">History</a>
                 </div>
             </div>
             <div class="nav-right">
@@ -50,12 +50,8 @@
                         <i class="fas fa-ellipsis-v"></i>
                     </button>
                     <div class="dropdown-menu">
-                        <a href="/settings.html" class="dropdown-item">
+                        <a href="/settings" class="dropdown-item">
                             <i class="fas fa-cog"></i> Account Settings
-                        </a>
-                        <div class="dropdown-divider"></div>
-                        <a href="#" class="dropdown-item" id="audio-toggle-btn">
-                            <i class="fas fa-volume-up"></i> <span id="audio-toggle-text">Trading Sounds</span>
                         </a>
                         <div class="dropdown-divider"></div>
                         <a href="#" class="dropdown-item" id="logout-btn">

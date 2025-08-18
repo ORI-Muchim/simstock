@@ -105,7 +105,10 @@ const authenticateUser = (username, password) => {
 const getUserData = (userId) => {
     return new Promise((resolve, reject) => {
         db.get(
-            'SELECT * FROM user_data WHERE user_id = ?',
+            `SELECT ud.*, u.created_at as member_since 
+             FROM user_data ud 
+             JOIN users u ON ud.user_id = u.id 
+             WHERE ud.user_id = ?`,
             [userId],
             (err, data) => {
                 if (err) return reject(err);

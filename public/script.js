@@ -205,7 +205,7 @@ function switchPage(page) {
         window.history.replaceState({}, '', '/?page=markets');
     } else if (page === 'history') {
         // Redirect to history page
-        window.location.href = '/history.html';
+        window.location.href = '/history';
     } else {
         tradePage.style.display = 'block';
         marketsPage.style.display = 'none';
@@ -360,7 +360,12 @@ function selectMarket(market) {
         coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png';
         coinIcon.alt = 'ETH';
         currentCryptoBalance = ethBalance;
-        document.getElementById('btc-balance').textContent = ethBalance.toFixed(8);
+        
+        // Update ETH balance with profit/loss
+        const ethProfit = spotProfits['ETH'] || { profitPercent: 0 };
+        const ethProfitText = ethProfit.profitPercent !== 0 ? 
+            ` <span style="color: ${ethProfit.profitPercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}; font-size: 0.9em;">(${ethProfit.profitPercent >= 0 ? '+' : ''}${ethProfit.profitPercent.toFixed(1)}%)</span>` : '';
+        document.getElementById('btc-balance').innerHTML = `${ethBalance.toFixed(8)}${ethProfitText}`;
         
         // Update crypto balance label
         const cryptoLabel = document.getElementById('crypto-balance-label');
@@ -371,7 +376,12 @@ function selectMarket(market) {
         coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1.png';
         coinIcon.alt = 'BTC';
         currentCryptoBalance = btcBalance;
-        document.getElementById('btc-balance').textContent = btcBalance.toFixed(8);
+        
+        // Update BTC balance with profit/loss
+        const btcProfit = spotProfits['BTC'] || { profitPercent: 0 };
+        const btcProfitText = btcProfit.profitPercent !== 0 ? 
+            ` <span style="color: ${btcProfit.profitPercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}; font-size: 0.9em;">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
+        document.getElementById('btc-balance').innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
         
         // Update crypto balance label
         const cryptoLabel = document.getElementById('crypto-balance-label');
@@ -439,7 +449,7 @@ async function checkLoginStatus() {
         }
     } else {
         // Redirect to login page
-        window.location.href = '/login.html';
+        window.location.href = '/login';
     }
 }
 
@@ -511,7 +521,8 @@ function setupLogoutButton() {
 
 // Logout function
 async function logout() {
-    await saveUserData();
+    // Save data in background (non-blocking)
+    saveUserData().catch(err => console.log('Save failed during logout:', err));
     
     currentUser = null;
     isLoggedIn = false;
@@ -527,12 +538,10 @@ async function logout() {
     transactions = [];
     leveragePositions = [];
     
-    showToast('Logged out successfully', 'info');
+    showToast('Logging out...', 'info');
     
-    // Redirect to login page
-    setTimeout(() => {
-        window.location.href = '/login.html';
-    }, 1000);
+    // Immediate redirect
+    window.location.href = '/login';
 }
 
 // Setup timezone change listener
@@ -628,7 +637,7 @@ async function loadUserData() {
     const token = localStorage.getItem('token');
     if (!token) {
         console.log('No token found, redirecting to login');
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
     }
     
@@ -664,7 +673,7 @@ async function loadUserData() {
             isLoggedIn = false;
             localStorage.removeItem('token');
             localStorage.removeItem('username');
-            window.location.href = '/login.html';
+            window.location.href = '/login';
             return;
         }
     } catch (error) {
@@ -700,7 +709,7 @@ async function saveUserData() {
             console.log('Authentication failed during save');
             localStorage.removeItem('token');
             localStorage.removeItem('username');
-            window.location.href = '/login.html';
+            window.location.href = '/login';
             return;
         } else {
             console.error('Failed to save user data:', response.status);
@@ -1797,11 +1806,24 @@ function updateRealtimeCandleData(newCandleData) {
         
         // 🚨 할머니 안전을 위한 중요한 시간 분석
         const intervalSeconds = getIntervalSeconds(currentInterval) || 60;
-        const isNewCandle = !lastStoredCandle || (newCandle.time >= lastStoredCandle.time + intervalSeconds);
+        
+        // Align times to interval boundaries for accurate comparison
+        const alignedNewTime = alignTimeToInterval(newCandle.time, currentInterval);
+        const alignedLastTime = lastStoredCandle ? alignTimeToInterval(lastStoredCandle.time, currentInterval) : 0;
+        
+        // Check if this is a new candle based on aligned interval boundaries
+        const isNewCandle = !lastStoredCandle || (alignedNewTime > alignedLastTime);
+        
+        // If new candle detected, use aligned time for consistency
+        if (isNewCandle) {
+            newCandle.time = alignedNewTime;
+        }
         
         console.log('🔍 Candle comparison:', {
             newCandleTime: newCandle.time,
+            alignedNewTime: alignedNewTime,
             lastStoredTime: lastStoredCandle?.time,
+            alignedLastTime: alignedLastTime,
             timeDiff: lastStoredCandle ? newCandle.time - lastStoredCandle.time : 'no last candle',
             intervalSeconds: intervalSeconds,
             isNewCandle: isNewCandle,
@@ -1834,14 +1856,14 @@ function updateRealtimeCandleData(newCandleData) {
         } else {
             // 기존 1분봉 업데이트 - 기존 캔들 수정
             console.log('📝 UPDATE existing candle');
-            // Look for exact timestamp match first (within last 5 candles)
-            for (let i = candleData.length - 1; i >= Math.max(0, candleData.length - 5); i--) {
-                if (candleData[i].time === newCandle.time) {
-                    candleToUpdate = candleData[i];
-                    candleIndex = i;
-                    break;
-                }
-            }
+            // Use the last candle for updates within the same interval
+            candleToUpdate = lastStoredCandle;
+            candleIndex = candleData.length - 1;
+            // Update with merged values
+            newCandle.time = lastStoredCandle.time; // Keep original time
+            newCandle.open = lastStoredCandle.open; // Keep original open
+            newCandle.high = Math.max(lastStoredCandle.high, newCandle.high);
+            newCandle.low = Math.min(lastStoredCandle.low, newCandle.low);
         }
         
         // If no exact match, check if this is an update for the current (latest) candle
@@ -1908,6 +1930,18 @@ function updateRealtimeCandleData(newCandleData) {
                 } else {
                     console.log('📊 Updating existing candle in series');
                     candleSeries.update(safeCandle);
+                    
+                    // 기존 캔들 업데이트 시 볼륨도 함께 업데이트
+                    if (volumeSeries) {
+                        const isUp = newCandle.close >= newCandle.open;
+                        const volumeData = {
+                            time: safeCandle.time,
+                            value: newCandle.volume || 0,
+                            color: isUp ? '#00d68f' : '#ff5a5f'
+                        };
+                        console.log('📊 Updating volume for existing candle:', volumeData);
+                        volumeSeries.update(volumeData);
+                    }
                 }
                 console.log('✅ Candle series updated successfully with safe data');
             } catch (error) {

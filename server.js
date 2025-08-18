@@ -19,7 +19,27 @@ const swaggerConfig = require('./config/swagger');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DEMO_MODE = process.env.DEMO_MODE === 'true' || false;
-const JWT_SECRET = process.env.JWT_SECRET || 'simstock_default_jwt_secret_key_2025_change_in_production_please';
+// Enhanced JWT secret security
+const JWT_SECRET = (() => {
+    const secret = process.env.JWT_SECRET;
+    
+    if (!secret) {
+        if (process.env.NODE_ENV === 'production') {
+            console.error('CRITICAL SECURITY ERROR: JWT_SECRET environment variable is required in production!');
+            process.exit(1);
+        } else {
+            console.warn('⚠️  WARNING: Using development JWT secret. Set JWT_SECRET environment variable for production!');
+            return 'dev_secret_' + require('crypto').randomBytes(32).toString('hex');
+        }
+    }
+    
+    if (secret.length < 32) {
+        console.error('SECURITY ERROR: JWT_SECRET must be at least 32 characters long!');
+        process.exit(1);
+    }
+    
+    return secret;
+})();
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -43,36 +63,83 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+            // Allow specific style sources (removing unsafe-inline for better security)
+            styleSrc: [
+                "'self'", 
+                "https://fonts.googleapis.com", 
+                "https://cdnjs.cloudflare.com",
+                "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='", // Empty inline styles
+                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
+            ].filter(Boolean),
+            // Restrict script sources and remove unsafe-eval
+            scriptSrc: [
+                "'self'", 
+                "https://unpkg.com", 
+                "https://cdn.jsdelivr.net",
+                // Add specific hashes for inline scripts if needed
+                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
+            ].filter(Boolean),
             fontSrc: ["'self'", "https://fonts.gstatic.com", "data:", "https://cdnjs.cloudflare.com"],
-            imgSrc: ["'self'", "data:", "https:", "http:", "blob:"],
-            connectSrc: ["'self'", "ws:", "wss:", "https:", "http:"],
+            // Restrict image sources to specific domains
+            imgSrc: [
+                "'self'", 
+                "data:", 
+                "https://s2.coinmarketcap.com", // For crypto icons
+                "https://www.okx.com",
+                "blob:"
+            ],
+            // Restrict connection sources to necessary domains
+            connectSrc: [
+                "'self'", 
+                "ws://localhost:*", 
+                "wss://localhost:*",
+                "https://www.okx.com", 
+                "wss://ws.okx.com",
+                "https://api.upbit.com"
+            ],
+            objectSrc: ["'none'"], // Prevent object/embed/applet
+            baseUri: ["'self'"], // Prevent base tag injection
+            formAction: ["'self'"], // Restrict form submissions
         },
     },
 }));
 
-// CORS configuration - Allow all origins in development
+// Enhanced CORS configuration with strict security
 const corsOptions = {
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+        // Define allowed origins based on environment
+        const allowedOrigins = process.env.NODE_ENV === 'production' 
+            ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [])
+            : [
+                'http://localhost:3000',
+                'http://127.0.0.1:3000',
+                'http://localhost:3001', // For development testing
+            ];
         
-        // In development, allow all origins
-        if (process.env.NODE_ENV !== 'production') {
+        // Log CORS requests for monitoring
+        if (origin) {
+            console.log(`CORS request from origin: ${origin}`);
+        }
+        
+        // Allow requests with no origin (like same-origin requests)
+        if (!origin) {
             return callback(null, true);
         }
         
-        // In production, check against allowed origins
-        const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000'];
-        if (allowedOrigins.indexOf(origin) !== -1) {
+        // Check if origin is in allowed list
+        if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            console.warn(`❌ CORS blocked request from unauthorized origin: ${origin}`);
+            callback(new Error(`CORS policy violation: Origin ${origin} is not allowed`));
         }
     },
     credentials: true,
-    optionsSuccessStatus: 200
+    optionsSuccessStatus: 200,
+    // Add additional security headers
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    maxAge: 86400, // Cache preflight response for 24 hours
 };
 
 app.use(cors(corsOptions));
@@ -116,9 +183,38 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve login page
-app.get('/login.html', (req, res) => {
+// Clean URL routes
+app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/history', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'history.html'));
+});
+
+app.get('/settings', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'settings.html'));
+});
+
+app.get('/monitoring', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'monitoring.html'));
+});
+
+// Legacy routes for backwards compatibility
+app.get('/login.html', (req, res) => {
+    res.redirect('/login');
+});
+
+app.get('/history.html', (req, res) => {
+    res.redirect('/history');
+});
+
+app.get('/settings.html', (req, res) => {
+    res.redirect('/settings');
+});
+
+app.get('/monitoring.html', (req, res) => {
+    res.redirect('/monitoring');
 });
 
 // HTTP Server
@@ -629,9 +725,10 @@ app.get('/api/monitoring/alerts/stats', (req, res) => {
     }
 });
 
-// Serve monitoring dashboard
-app.get('/monitoring.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'monitoring.html'));
+
+// Serve 404 page
+app.get('/404.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', '404.html'));
 });
 
 /**
@@ -835,15 +932,10 @@ app.get('/api/candles/:interval', async (req, res) => {
         // Sort and send final result
         mergedCandles.sort((a, b) => a.time - b.time);
         
-        // Apply volume scaling to all candles before sending to client
-        const scaledCandles = mergedCandles.map(candle => ({
-            ...candle,
-            volume: candle.volume * 0.01 // 스케일링: 거래량 × 0.01
-        }));
+        // Sort and send final result (remove unnecessary volume scaling)
+        console.log(`Total: Serving ${mergedCandles.length} candles (${dbCandles.length} from DB + ${mergedCandles.length - dbCandles.length} from API)`);
         
-        console.log(`Total: Serving ${scaledCandles.length} candles (${dbCandles.length} from DB + ${scaledCandles.length - dbCandles.length} from API) with volume scaling`);
-        
-        res.json(scaledCandles);
+        res.json(mergedCandles);
     } catch (error) {
         console.error('Failed to fetch candles:', error);
         res.status(500).json({ error: 'Failed to fetch candle data' });
@@ -1060,7 +1152,8 @@ app.get('/api/user/data', authenticateToken, async (req, res) => {
             btcBalance: userData.btc_balance,
             transactions: userData.transactions,
             leveragePositions: userData.leverage_positions,
-            timezone: userData.timezone || 'UTC'
+            timezone: userData.timezone || 'UTC',
+            memberSince: userData.member_since
         });
     } catch (error) {
         console.error('Error fetching user data:', error);
@@ -1213,9 +1306,20 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Handle 404
+// Handle 404 - Serve HTML for browser requests, JSON for API requests
 app.use((req, res) => {
-    res.status(404).json({ error: 'Route not found' });
+    // Check if request is for an API endpoint
+    if (req.path.startsWith('/api/')) {
+        res.status(404).json({ error: 'API endpoint not found' });
+    } 
+    // Check if request accepts HTML (browser request)
+    else if (req.accepts('html')) {
+        res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
+    } 
+    // Default to JSON response
+    else {
+        res.status(404).json({ error: 'Route not found' });
+    }
 });
 
 // Real-time candle updates are now handled directly through OKX WebSocket

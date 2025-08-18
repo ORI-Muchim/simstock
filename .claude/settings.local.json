@@ -25,7 +25,12 @@
       "Bash(cp:*)",
       "Bash(sqlite3:*)",
       "Bash(node server.js)",
-      "Bash(open http://localhost:3000)"
+      "Bash(open http://localhost:3000)",
+      "Bash(start http://localhost:3000)",
+      "Bash(start http://localhost:3000/test-404-page)",
+      "Bash(start http://localhost:3000/settings.html)",
+      "Bash(dir \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")",
+      "Bash(del \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

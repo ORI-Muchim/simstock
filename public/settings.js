@@ -20,7 +20,7 @@ async function checkLoginStatus() {
     const username = localStorage.getItem('username');
     
     if (!token || !username) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
     }
     
@@ -89,19 +89,18 @@ function formatTimestampWithTimezone(timestamp, timezone = userTimezone) {
 
 // Logout function
 async function logout() {
-    await saveUserData();
+    // Save data in background (non-blocking)
+    saveUserData().catch(err => console.log('Save failed during logout:', err));
     
     currentUser = null;
     isLoggedIn = false;
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     
-    showToast('Logged out successfully', 'info');
+    showToast('Logging out...', 'info');
     
-    // Redirect to login page
-    setTimeout(() => {
-        window.location.href = '/login.html';
-    }, 1000);
+    // Immediate redirect
+    window.location.href = '/login';
 }
 
 // Load user data
@@ -126,6 +125,34 @@ async function loadUserData() {
             
             console.log('Loaded user timezone from server:', userData.timezone);
             console.log('Set userTimezone to:', userTimezone);
+            
+            // Update member since date
+            if (userData.memberSince) {
+                const memberDate = new Date(userData.memberSince);
+                const today = new Date();
+                const diffTime = Math.abs(today - memberDate);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                let memberSinceText;
+                if (diffDays === 0) {
+                    memberSinceText = 'Today';
+                } else if (diffDays === 1) {
+                    memberSinceText = 'Yesterday';
+                } else if (diffDays < 30) {
+                    memberSinceText = `${diffDays} days ago`;
+                } else if (diffDays < 365) {
+                    const months = Math.floor(diffDays / 30);
+                    memberSinceText = `${months} month${months > 1 ? 's' : ''} ago`;
+                } else {
+                    const years = Math.floor(diffDays / 365);
+                    memberSinceText = `${years} year${years > 1 ? 's' : ''} ago`;
+                }
+                
+                const memberSinceElement = document.getElementById('member-since');
+                if (memberSinceElement) {
+                    memberSinceElement.textContent = memberSinceText;
+                }
+            }
             
         } else if (response.status === 401) {
             // Token expired or invalid
@@ -171,18 +198,44 @@ async function saveUserData() {
 
 // Update UI with current data
 function updateUI() {
-    const portfolioValue = usdBalance + (btcBalance * getCurrentPrice());
+    const currentPrice = getCurrentPrice();
+    const portfolioValue = usdBalance + (btcBalance * currentPrice);
+    const btcValue = btcBalance * currentPrice;
+    const btcPercentage = portfolioValue > 0 ? (btcValue / portfolioValue) * 100 : 0;
     
-    document.getElementById('usd-balance').textContent = 
-        `$${usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    // Update navigation balance displays
+    const usdBalanceElement = document.getElementById('krw-balance');
+    if (usdBalanceElement) {
+        usdBalanceElement.textContent = 
+            `$${usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    }
     
-    document.getElementById('btc-balance').textContent = 
-        btcBalance.toFixed(8);
+    // Update BTC balance with percentage in navigation
+    const btcBalanceElement = document.getElementById('btc-balance');
+    if (btcBalanceElement) {
+        // Calculate profit/loss percentage based on initial value
+        const initialValue = 10000; // Initial USD balance
+        const currentTotalValue = portfolioValue;
+        const profitLossAmount = currentTotalValue - initialValue;
+        const profitLossPercentage = (profitLossAmount / initialValue) * 100;
+        const isProfit = profitLossAmount >= 0;
+        const percentageColor = isProfit ? 'var(--accent-green)' : 'var(--accent-red)';
+        const sign = isProfit ? '+' : '';
         
-    document.getElementById('portfolio-value').textContent = 
-        `$${portfolioValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-        
-    document.getElementById('total-trades').textContent = transactions.length.toString();
+        btcBalanceElement.innerHTML = `${btcBalance.toFixed(8)} <span style="color: ${percentageColor}; font-size: 0.9em;">(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
+    }
+    
+    // Update settings page elements if they exist
+    const portfolioValueElement = document.getElementById('portfolio-value');
+    if (portfolioValueElement) {
+        portfolioValueElement.textContent = 
+            `$${portfolioValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    }
+    
+    const totalTradesElement = document.getElementById('total-trades');
+    if (totalTradesElement) {
+        totalTradesElement.textContent = transactions.length.toString();
+    }
 }
 
 // Get current price (placeholder - in real app this would come from WebSocket)
@@ -291,6 +344,9 @@ function setupSettingsPage() {
 
     // Update time display every second
     setInterval(updateCurrentTimeDisplay, 1000);
+    
+    // Setup Trading Sounds toggle
+    setupTradingSoundsToggle();
 }
 
 // Setup custom dropdown functionality
@@ -505,4 +561,30 @@ function removeToast(toast) {
             toast.remove();
         }
     }, 300);
+}
+
+// Setup Trading Sounds toggle functionality
+function setupTradingSoundsToggle() {
+    const toggle = document.getElementById('trading-sounds-toggle');
+    const toggleText = document.getElementById('trading-sounds-text');
+    
+    if (!toggle || !toggleText) return;
+    
+    // Load current setting from localStorage
+    const isEnabled = localStorage.getItem('trading-sounds-enabled') !== 'false';
+    toggle.checked = isEnabled;
+    toggleText.textContent = isEnabled ? 'Enabled' : 'Disabled';
+    
+    // Handle toggle change
+    toggle.addEventListener('change', (e) => {
+        const enabled = e.target.checked;
+        localStorage.setItem('trading-sounds-enabled', enabled);
+        toggleText.textContent = enabled ? 'Enabled' : 'Disabled';
+        
+        showToast(
+            `Trading sounds ${enabled ? 'enabled' : 'disabled'}`, 
+            'success', 
+            3000
+        );
+    });
 }

@@ -33,7 +33,7 @@ async function checkLoginStatus() {
         }
     } else {
         // Redirect to login page
-        window.location.href = '/login.html';
+        window.location.href = '/login';
     }
 }
 
@@ -122,12 +122,10 @@ async function logout() {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
     
-    showToast('Logged out successfully', 'info');
+    showToast('Logging out...', 'info');
     
-    // Redirect to login page
-    setTimeout(() => {
-        window.location.href = '/login.html';
-    }, 1000);
+    // Immediate redirect
+    window.location.href = '/login';
 }
 
 // Load user data
@@ -169,7 +167,17 @@ function updateBalanceDisplay() {
     
     const btcBalanceEl = document.getElementById('btc-balance');
     if (btcBalanceEl) {
-        btcBalanceEl.textContent = btcBalance.toFixed(8);
+        // Calculate profit/loss percentage based on initial value
+        const initialValue = 10000; // Initial USD balance
+        const currentBtcPrice = 50000; // Placeholder price, same as settings.js
+        const currentTotalValue = usdBalance + (btcBalance * currentBtcPrice);
+        const profitLossAmount = currentTotalValue - initialValue;
+        const profitLossPercentage = (profitLossAmount / initialValue) * 100;
+        const isProfit = profitLossAmount >= 0;
+        const percentageColor = isProfit ? 'var(--accent-green)' : 'var(--accent-red)';
+        const sign = isProfit ? '+' : '';
+        
+        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)} <span style="color: ${percentageColor}; font-size: 0.9em;">(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
     }
 }
 
