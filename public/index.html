@@ -221,31 +221,79 @@
             <div class="orderbook-section">
                 <div class="orderbook-container">
                     <div class="panel-header">
-                        <h3>Order Book</h3>
+                        <h3><i class="fas fa-layer-group"></i> Order Book</h3>
                         <div class="orderbook-controls">
-                            <button class="ob-control active" title="Both">
+                            <div class="precision-selector">
+                                <select id="price-precision" class="precision-dropdown">
+                                    <option value="2">0.01</option>
+                                    <option value="1">0.1</option>
+                                    <option value="0" selected>1</option>
+                                </select>
+                            </div>
+                            <button class="ob-control active" data-view="both" title="Both">
                                 <i class="fas fa-align-justify"></i>
                             </button>
-                            <button class="ob-control" title="Bids">
-                                <i class="fas fa-sort-amount-up"></i>
-                            </button>
-                            <button class="ob-control" title="Asks">
+                            <button class="ob-control" data-view="asks" title="Asks Only">
                                 <i class="fas fa-sort-amount-down"></i>
                             </button>
+                            <button class="ob-control" data-view="bids" title="Bids Only">
+                                <i class="fas fa-sort-amount-up"></i>
+                            </button>
                         </div>
                     </div>
+                    
                     <div class="orderbook-header">
-                        <span>Price (USDT)</span>
-                        <span>Amount (BTC)</span>
-                        <span>Total</span>
+                        <span class="header-price">Price (USDT)</span>
+                        <span class="header-amount">Size (BTC)</span>
+                        <span class="header-total">Total</span>
                     </div>
+                    
                     <div class="orderbook-content">
-                        <div id="asks" class="asks"></div>
-                        <div class="orderbook-spread">
-                            <span class="spread-value" id="orderbook-spread">0.00</span>
-                            <span class="spread-label">Spread</span>
+                        <!-- Market Depth Visualization -->
+                        <div class="depth-chart-mini" id="depth-chart-mini">
+                            <canvas id="depth-canvas" width="300" height="60"></canvas>
                         </div>
-                        <div id="bids" class="bids"></div>
+                        
+                        <!-- Asks Section -->
+                        <div id="asks" class="asks orderbook-side">
+                            <div class="orderbook-loading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                Loading orders...
+                            </div>
+                        </div>
+                        
+                        <!-- Spread Section -->
+                        <div class="orderbook-spread">
+                            <div class="spread-info">
+                                <span class="spread-label">Spread</span>
+                                <span class="spread-value" id="orderbook-spread">0.00</span>
+                                <span class="spread-percentage" id="spread-percentage">(0.00%)</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Bids Section -->
+                        <div id="bids" class="bids orderbook-side">
+                            <div class="orderbook-loading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                Loading orders...
+                            </div>
+                        </div>
+                        
+                        <!-- Market Depth Stats -->
+                        <div class="market-depth-stats">
+                            <div class="depth-stat">
+                                <span class="stat-label">Bids:</span>
+                                <span class="stat-value bid-total" id="total-bids">0.00</span>
+                            </div>
+                            <div class="depth-stat">
+                                <span class="stat-label">Asks:</span>
+                                <span class="stat-value ask-total" id="total-asks">0.00</span>
+                            </div>
+                            <div class="depth-stat">
+                                <span class="stat-label">Ratio:</span>
+                                <span class="stat-value ratio" id="bid-ask-ratio">0.0</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

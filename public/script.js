@@ -1257,12 +1257,45 @@ function updatePrice(data) {
     updateUI();
 }
 
-// Update orderbook display with smooth transitions
+// Professional Orderbook System
 let lastOrderbookUpdate = 0;
-const ORDERBOOK_UPDATE_THROTTLE = 500; // Update every 500ms maximum
+let previousOrderbook = { bids: [], asks: [] };
+const ORDERBOOK_UPDATE_THROTTLE = 200; // Update every 200ms for smoother updates
+let pricePrecision = 0; // Default precision
+let cumulativeVolumeCache = { bids: [], asks: [] };
 
+// Initialize professional orderbook
+function initializeProfessionalOrderbook() {
+    // Remove loading indicators
+    document.querySelectorAll('.orderbook-loading').forEach(el => el.remove());
+    
+    // Setup precision selector
+    const precisionSelector = document.getElementById('price-precision');
+    if (precisionSelector) {
+        precisionSelector.addEventListener('change', (e) => {
+            pricePrecision = parseInt(e.target.value);
+            if (orderbook.bids && orderbook.asks) {
+                updateOrderbook(orderbook);
+            }
+        });
+    }
+    
+    // Setup view controls
+    const viewControls = document.querySelectorAll('.ob-control');
+    viewControls.forEach(control => {
+        control.addEventListener('click', (e) => {
+            viewControls.forEach(c => c.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            updateOrderbookView(e.currentTarget.dataset.view);
+        });
+    });
+    
+    // Initialize mini depth chart
+    initializeDepthChart();
+}
+
+// Update orderbook with professional features
 function updateOrderbook(data) {
-    // Skip update if data is invalid or empty
     if (!data || !data.bids || !data.asks || data.bids.length === 0 || data.asks.length === 0) {
         console.log('Skipping orderbook update - invalid data');
         return;
@@ -1270,96 +1303,331 @@ function updateOrderbook(data) {
     
     const now = Date.now();
     if (now - lastOrderbookUpdate < ORDERBOOK_UPDATE_THROTTLE) {
-        return; // Skip update if too frequent
+        return;
     }
     lastOrderbookUpdate = now;
     
-    // Merge new data with existing orderbook to maintain continuity
-    if (orderbook.bids && orderbook.asks) {
-        // Update existing orderbook with new data, keeping old data as fallback
-        orderbook.bids = data.bids.length > 5 ? data.bids : [...data.bids, ...orderbook.bids.slice(data.bids.length)];
-        orderbook.asks = data.asks.length > 5 ? data.asks : [...data.asks, ...orderbook.asks.slice(data.asks.length)];
-    } else {
-        orderbook = data;
-    }
+    // Store previous data for change detection
+    previousOrderbook = JSON.parse(JSON.stringify(orderbook));
     
-    const ORDERBOOK_ROWS = 15; // Fixed number of rows
+    // Update global orderbook
+    orderbook = data;
     
-    // Update asks (reversed for display) in USD
+    // Calculate cumulative volumes
+    calculateCumulativeVolumes();
+    
+    // Update display
+    updateOrderbookDisplay();
+    updateSpreadDisplay();
+    updateMarketDepthStats();
+    updateDepthChart();
+}
+
+function updateOrderbookDisplay() {
+    const ORDERBOOK_ROWS = 20;
+    
+    // Process and display asks (sell orders)
     const asks = orderbook.asks.slice(0, ORDERBOOK_ROWS).reverse();
     const asksContainer = document.getElementById('asks');
-    const existingAsksRows = asksContainer.querySelectorAll('.orderbook-row');
+    updateOrderbookSide(asksContainer, asks, 'asks', true);
     
-    // Update existing rows or create new ones for asks
-    for (let i = 0; i < ORDERBOOK_ROWS; i++) {
-        let row = existingAsksRows[i];
-        if (!row) {
-            row = document.createElement('div');
-            row.className = 'orderbook-row';
-            row.innerHTML = `
-                <span class="orderbook-price">-</span>
-                <span class="orderbook-size">-</span>
-                <span class="orderbook-total">-</span>
-            `;
-            asksContainer.appendChild(row);
-        }
-        
-        if (i < asks.length && asks[i]) {
-            const [price, size] = asks[i];
-            row.classList.remove('orderbook-empty');
-            row.querySelector('.orderbook-price').textContent = `$${parseFloat(price).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            row.querySelector('.orderbook-size').textContent = parseFloat(size).toFixed(8);
-            row.querySelector('.orderbook-total').textContent = `$${(parseFloat(price) * parseFloat(size)).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-        } else {
-            row.classList.add('orderbook-empty');
-            row.querySelector('.orderbook-price').textContent = '-';
-            row.querySelector('.orderbook-size').textContent = '-';
-            row.querySelector('.orderbook-total').textContent = '-';
-        }
-    }
-    
-    // Update bids in USD
+    // Process and display bids (buy orders)  
     const bids = orderbook.bids.slice(0, ORDERBOOK_ROWS);
     const bidsContainer = document.getElementById('bids');
-    const existingBidsRows = bidsContainer.querySelectorAll('.orderbook-row');
+    updateOrderbookSide(bidsContainer, bids, 'bids', false);
+}
+
+function updateOrderbookSide(container, orders, type, isReversed) {
+    // Clear existing content
+    container.innerHTML = '';
     
-    // Update existing rows or create new ones for bids
-    for (let i = 0; i < ORDERBOOK_ROWS; i++) {
-        let row = existingBidsRows[i];
-        if (!row) {
-            row = document.createElement('div');
-            row.className = 'orderbook-row';
-            row.innerHTML = `
-                <span class="orderbook-price">-</span>
-                <span class="orderbook-size">-</span>
-                <span class="orderbook-total">-</span>
-            `;
-            bidsContainer.appendChild(row);
-        }
+    const maxVolume = Math.max(
+        ...cumulativeVolumeCache.bids.slice(0, 10).map(item => item.cumulative || 0),
+        ...cumulativeVolumeCache.asks.slice(0, 10).map(item => item.cumulative || 0)
+    );
+    
+    orders.forEach((order, index) => {
+        if (!order) return;
         
-        if (i < bids.length && bids[i]) {
-            const [price, size] = bids[i];
-            row.classList.remove('orderbook-empty');
-            row.querySelector('.orderbook-price').textContent = `$${parseFloat(price).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            row.querySelector('.orderbook-size').textContent = parseFloat(size).toFixed(8);
-            row.querySelector('.orderbook-total').textContent = `$${(parseFloat(price) * parseFloat(size)).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-        } else {
-            row.classList.add('orderbook-empty');
-            row.querySelector('.orderbook-price').textContent = '-';
-            row.querySelector('.orderbook-size').textContent = '-';
-            row.querySelector('.orderbook-total').textContent = '-';
-        }
-    }
+        const [price, size] = order;
+        const priceNum = parseFloat(price);
+        const sizeNum = parseFloat(size);
+        const total = priceNum * sizeNum;
+        
+        // Get cumulative volume
+        const cumulativeData = type === 'asks' ? 
+            cumulativeVolumeCache.asks[isReversed ? orders.length - 1 - index : index] :
+            cumulativeVolumeCache.bids[index];
+        const cumulativeVolume = cumulativeData ? cumulativeData.cumulative : 0;
+        
+        // Calculate depth percentage for volume bar
+        const depthPercentage = maxVolume > 0 ? (cumulativeVolume / maxVolume) * 100 : 0;
+        
+        // Detect price changes
+        const prevOrder = type === 'asks' ? 
+            previousOrderbook.asks?.find(([p]) => Math.abs(parseFloat(p) - priceNum) < 0.01) :
+            previousOrderbook.bids?.find(([p]) => Math.abs(parseFloat(p) - priceNum) < 0.01);
+        
+        const isChanged = prevOrder && parseFloat(prevOrder[1]) !== sizeNum;
+        
+        const row = document.createElement('div');
+        row.className = `orderbook-row ${isChanged ? 'flash-update' : ''}`;
+        row.style.setProperty('--depth', `${depthPercentage}%`);
+        
+        // Format price with precision
+        const formattedPrice = formatPrice(priceNum, pricePrecision);
+        
+        row.innerHTML = `
+            <span class="orderbook-price">$${formattedPrice}</span>
+            <span class="orderbook-size">${sizeNum.toFixed(8)}</span>
+            <span class="orderbook-total">$${total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+        `;
+        
+        // Add click handler for price selection
+        row.addEventListener('click', () => {
+            selectPrice(priceNum);
+        });
+        
+        container.appendChild(row);
+    });
+}
+
+function calculateCumulativeVolumes() {
+    // Calculate cumulative volumes for depth visualization
+    let bidsCumulative = 0;
+    let asksCumulative = 0;
     
-    // Update spread
+    cumulativeVolumeCache.bids = orderbook.bids.map(([price, size]) => {
+        bidsCumulative += parseFloat(size);
+        return {
+            price: parseFloat(price),
+            size: parseFloat(size),
+            cumulative: bidsCumulative
+        };
+    });
+    
+    cumulativeVolumeCache.asks = orderbook.asks.map(([price, size]) => {
+        asksCumulative += parseFloat(size);
+        return {
+            price: parseFloat(price),
+            size: parseFloat(size),
+            cumulative: asksCumulative
+        };
+    });
+}
+
+function updateSpreadDisplay() {
     if (orderbook.asks.length > 0 && orderbook.bids.length > 0) {
-        const spread = orderbook.asks[0][0] - orderbook.bids[0][0];
+        const bestAsk = parseFloat(orderbook.asks[0][0]);
+        const bestBid = parseFloat(orderbook.bids[0][0]);
+        const spread = bestAsk - bestBid;
+        const spreadPercentage = ((spread / bestBid) * 100);
+        
         const spreadElement = document.getElementById('orderbook-spread');
+        const spreadPercentageElement = document.getElementById('spread-percentage');
+        
         if (spreadElement) {
-            spreadElement.textContent = `$${spread.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            spreadElement.textContent = `$${spread.toFixed(2)}`;
+        }
+        if (spreadPercentageElement) {
+            spreadPercentageElement.textContent = `(${spreadPercentage.toFixed(3)}%)`;
         }
     }
 }
+
+function updateMarketDepthStats() {
+    const bidVolume = cumulativeVolumeCache.bids.reduce((sum, item) => sum + item.size, 0);
+    const askVolume = cumulativeVolumeCache.asks.reduce((sum, item) => sum + item.size, 0);
+    const ratio = bidVolume > 0 ? (askVolume / bidVolume).toFixed(2) : '0.0';
+    
+    const totalBidsElement = document.getElementById('total-bids');
+    const totalAsksElement = document.getElementById('total-asks');
+    const ratioElement = document.getElementById('bid-ask-ratio');
+    
+    if (totalBidsElement) totalBidsElement.textContent = bidVolume.toFixed(4);
+    if (totalAsksElement) totalAsksElement.textContent = askVolume.toFixed(4);
+    if (ratioElement) ratioElement.textContent = ratio;
+}
+
+function formatPrice(price, precision) {
+    return price.toLocaleString('en-US', {
+        minimumFractionDigits: precision,
+        maximumFractionDigits: precision
+    });
+}
+
+function selectPrice(price) {
+    // Fill trading form with selected price
+    const priceInput = document.getElementById('price');
+    if (priceInput) {
+        priceInput.value = price.toFixed(2);
+        priceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+function updateOrderbookView(view) {
+    const asksContainer = document.getElementById('asks');
+    const bidsContainer = document.getElementById('bids');
+    const spreadSection = document.querySelector('.orderbook-spread');
+    
+    switch (view) {
+        case 'asks':
+            asksContainer.style.display = 'block';
+            bidsContainer.style.display = 'none';
+            spreadSection.style.display = 'none';
+            break;
+        case 'bids':
+            asksContainer.style.display = 'none';
+            bidsContainer.style.display = 'block';
+            spreadSection.style.display = 'none';
+            break;
+        default: // both
+            asksContainer.style.display = 'block';
+            bidsContainer.style.display = 'block';
+            spreadSection.style.display = 'flex';
+    }
+}
+
+// Mini Depth Chart Functionality
+let depthCanvas, depthCtx;
+
+function initializeDepthChart() {
+    depthCanvas = document.getElementById('depth-canvas');
+    if (!depthCanvas) return;
+    
+    depthCtx = depthCanvas.getContext('2d');
+    
+    // Set canvas size for high DPI displays
+    const rect = depthCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    depthCanvas.width = rect.width * dpr;
+    depthCanvas.height = rect.height * dpr;
+    depthCtx.scale(dpr, dpr);
+    
+    // Initial empty chart
+    drawEmptyDepthChart();
+}
+
+function updateDepthChart() {
+    if (!depthCanvas || !depthCtx || !orderbook.bids || !orderbook.asks) return;
+    
+    const width = depthCanvas.clientWidth;
+    const height = depthCanvas.clientHeight;
+    
+    // Clear canvas
+    depthCtx.clearRect(0, 0, width, height);
+    
+    // Get data for chart
+    const bidData = cumulativeVolumeCache.bids.slice(0, 20);
+    const askData = cumulativeVolumeCache.asks.slice(0, 20);
+    
+    if (bidData.length === 0 || askData.length === 0) {
+        drawEmptyDepthChart();
+        return;
+    }
+    
+    // Calculate scales
+    const allPrices = [...bidData.map(d => d.price), ...askData.map(d => d.price)];
+    const allVolumes = [...bidData.map(d => d.cumulative), ...askData.map(d => d.cumulative)];
+    
+    const minPrice = Math.min(...allPrices);
+    const maxPrice = Math.max(...allPrices);
+    const maxVolume = Math.max(...allVolumes);
+    
+    const priceRange = maxPrice - minPrice;
+    const padding = 10;
+    
+    // Draw background
+    depthCtx.fillStyle = 'rgba(26, 32, 44, 0.5)';
+    depthCtx.fillRect(0, 0, width, height);
+    
+    // Draw bids (green area)
+    depthCtx.beginPath();
+    depthCtx.fillStyle = 'rgba(0, 214, 143, 0.3)';
+    depthCtx.strokeStyle = '#00d68f';
+    depthCtx.lineWidth = 1.5;
+    
+    bidData.forEach((point, index) => {
+        const x = padding + ((point.price - minPrice) / priceRange) * (width - 2 * padding);
+        const y = height - padding - (point.cumulative / maxVolume) * (height - 2 * padding);
+        
+        if (index === 0) {
+            depthCtx.moveTo(x, height - padding);
+            depthCtx.lineTo(x, y);
+        } else {
+            depthCtx.lineTo(x, y);
+        }
+    });
+    
+    // Complete the area for bids
+    const lastBidX = padding + ((bidData[bidData.length - 1].price - minPrice) / priceRange) * (width - 2 * padding);
+    depthCtx.lineTo(lastBidX, height - padding);
+    depthCtx.closePath();
+    depthCtx.fill();
+    depthCtx.stroke();
+    
+    // Draw asks (red area)
+    depthCtx.beginPath();
+    depthCtx.fillStyle = 'rgba(255, 90, 95, 0.3)';
+    depthCtx.strokeStyle = '#ff5a5f';
+    depthCtx.lineWidth = 1.5;
+    
+    askData.forEach((point, index) => {
+        const x = padding + ((point.price - minPrice) / priceRange) * (width - 2 * padding);
+        const y = height - padding - (point.cumulative / maxVolume) * (height - 2 * padding);
+        
+        if (index === 0) {
+            depthCtx.moveTo(x, height - padding);
+            depthCtx.lineTo(x, y);
+        } else {
+            depthCtx.lineTo(x, y);
+        }
+    });
+    
+    // Complete the area for asks
+    const lastAskX = padding + ((askData[askData.length - 1].price - minPrice) / priceRange) * (width - 2 * padding);
+    depthCtx.lineTo(lastAskX, height - padding);
+    depthCtx.closePath();
+    depthCtx.fill();
+    depthCtx.stroke();
+    
+    // Draw center line (spread)
+    if (orderbook.bids[0] && orderbook.asks[0]) {
+        const bestBid = parseFloat(orderbook.bids[0][0]);
+        const bestAsk = parseFloat(orderbook.asks[0][0]);
+        const midPrice = (bestBid + bestAsk) / 2;
+        const midX = padding + ((midPrice - minPrice) / priceRange) * (width - 2 * padding);
+        
+        depthCtx.strokeStyle = '#ffb800';
+        depthCtx.lineWidth = 1;
+        depthCtx.setLineDash([3, 3]);
+        depthCtx.beginPath();
+        depthCtx.moveTo(midX, padding);
+        depthCtx.lineTo(midX, height - padding);
+        depthCtx.stroke();
+        depthCtx.setLineDash([]);
+    }
+}
+
+function drawEmptyDepthChart() {
+    if (!depthCtx) return;
+    
+    const width = depthCanvas.clientWidth;
+    const height = depthCanvas.clientHeight;
+    
+    depthCtx.clearRect(0, 0, width, height);
+    depthCtx.fillStyle = 'rgba(26, 32, 44, 0.5)';
+    depthCtx.fillRect(0, 0, width, height);
+    
+    // Draw "Loading..." text
+    depthCtx.fillStyle = '#5a6374';
+    depthCtx.font = '12px monospace';
+    depthCtx.textAlign = 'center';
+    depthCtx.fillText('Loading market depth...', width / 2, height / 2);
+}
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', initializeProfessionalOrderbook);
 
 // Load candle data
 async function loadCandles(interval) {
