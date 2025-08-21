@@ -30,7 +30,8 @@
       "Bash(start http://localhost:3000/test-404-page)",
       "Bash(start http://localhost:3000/settings.html)",
       "Bash(dir \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")",
-      "Bash(del \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")"
+      "Bash(del \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")",
+      "Bash(start http://localhost:3000/login.html)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

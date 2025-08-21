@@ -2051,6 +2051,53 @@ body {
     color: var(--accent-red);
 }
 
+/* Profit/Loss text styles for dynamic content */
+.profit-text {
+    color: var(--accent-green);
+    font-size: 0.9em;
+}
+
+.loss-text {
+    color: var(--accent-red);
+    font-size: 0.9em;
+}
+
+.profit-text-small {
+    color: var(--accent-green);
+    font-size: 0.85em;
+    margin-left: 4px;
+}
+
+.loss-text-small {
+    color: var(--accent-red);
+    font-size: 0.85em;
+    margin-left: 4px;
+}
+
+span[data-percentage] {
+    font-size: 0.9em;
+}
+
+/* Empty message styles */
+.empty-message {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 40px;
+}
+
+.empty-message-inline {
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+/* Position market label */
+.position-market-label {
+    color: var(--text-secondary);
+    font-size: 0.85em;
+    margin-left: 8px;
+    font-weight: 500;
+}
+
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

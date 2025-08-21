@@ -222,7 +222,7 @@ function updateUI() {
         const percentageColor = isProfit ? 'var(--accent-green)' : 'var(--accent-red)';
         const sign = isProfit ? '+' : '';
         
-        btcBalanceElement.innerHTML = `${btcBalance.toFixed(8)} <span style="color: ${percentageColor}; font-size: 0.9em;">(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
+        btcBalanceElement.innerHTML = `${btcBalance.toFixed(8)} <span class="${isProfit ? 'profit-text' : 'loss-text'}" data-percentage>(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
     }
     
     // Update settings page elements if they exist

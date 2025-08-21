@@ -177,7 +177,7 @@ function updateBalanceDisplay() {
         const percentageColor = isProfit ? 'var(--accent-green)' : 'var(--accent-red)';
         const sign = isProfit ? '+' : '';
         
-        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)} <span style="color: ${percentageColor}; font-size: 0.9em;">(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
+        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)} <span class="${isProfit ? 'profit-text' : 'loss-text'}">(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
     }
 }
 
@@ -405,7 +405,7 @@ function loadTransactionHistory() {
     if (transactions.length === 0) {
         document.getElementById('transaction-table-body').innerHTML = `
             <tr>
-                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 40px;">
+                <td colspan="7" class="empty-message">
                     No transactions found
                 </td>
             </tr>

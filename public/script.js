@@ -364,7 +364,7 @@ function selectMarket(market) {
         // Update ETH balance with profit/loss
         const ethProfit = spotProfits['ETH'] || { profitPercent: 0 };
         const ethProfitText = ethProfit.profitPercent !== 0 ? 
-            ` <span style="color: ${ethProfit.profitPercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}; font-size: 0.9em;">(${ethProfit.profitPercent >= 0 ? '+' : ''}${ethProfit.profitPercent.toFixed(1)}%)</span>` : '';
+            ` <span class="${ethProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${ethProfit.profitPercent >= 0 ? '+' : ''}${ethProfit.profitPercent.toFixed(1)}%)</span>` : '';
         document.getElementById('btc-balance').innerHTML = `${ethBalance.toFixed(8)}${ethProfitText}`;
         
         // Update crypto balance label
@@ -380,7 +380,7 @@ function selectMarket(market) {
         // Update BTC balance with profit/loss
         const btcProfit = spotProfits['BTC'] || { profitPercent: 0 };
         const btcProfitText = btcProfit.profitPercent !== 0 ? 
-            ` <span style="color: ${btcProfit.profitPercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}; font-size: 0.9em;">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
+            ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
         document.getElementById('btc-balance').innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
         
         // Update crypto balance label
@@ -3220,7 +3220,7 @@ function updateLeveragePositionsDisplay() {
     const container = document.getElementById('active-positions');
     
     if (leveragePositions.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">No positions</p>';
+        container.innerHTML = '<p class="empty-message-inline">No positions</p>';
         return;
     }
     
@@ -3234,7 +3234,7 @@ function updateLeveragePositionsDisplay() {
                 <div class="position-type-info">
                     <span class="position-type-label ${position.type}">${position.type.toUpperCase()}</span>
                     <span class="position-leverage">${position.leverage}x</span>
-                    <span class="position-market" style="color: var(--text-secondary); font-size: 0.85em; margin-left: 8px; font-weight: 500;">${position.market || 'BTC/USDT'}</span>
+                    <span class="position-market-label">${position.market || 'BTC/USDT'}</span>
                 </div>
                 <div class="position-prices">
                     <span class="entry-price">Entry: $${position.entryPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
@@ -3486,7 +3486,9 @@ function updateUI() {
         const profitColor = currentProfit.profitPercent > 0 ? 'var(--accent-green)' : 
                            currentProfit.profitPercent < 0 ? 'var(--accent-red)' : '';
         
-        btcBalanceEl.innerHTML = `${currentBalance.toFixed(8)}<span style="color: ${profitColor}; font-size: 0.85em; margin-left: 4px;">${profitText}</span>`;
+        const profitClass = currentProfit.profitPercent > 0 ? 'profit-text-small' : 
+                           currentProfit.profitPercent < 0 ? 'loss-text-small' : '';
+        btcBalanceEl.innerHTML = `${currentBalance.toFixed(8)}<span class="${profitClass}">${profitText}</span>`;
     }
     
     // Update current market's spot profit display

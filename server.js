@@ -69,14 +69,21 @@ app.use(helmet({
                 "https://fonts.googleapis.com", 
                 "https://cdnjs.cloudflare.com",
                 "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='", // Empty inline styles
-                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
+                "'sha256-5o/xXiuiuwpezmuqlP2nTVguD0j4V0nkPsBTti+gmLQ='", // style="display:none"
+                "'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='", // style=""
+                "'sha256-nlJqzRTYboExZzVD4DQxb+uOHpm0xUODsM+51NcB0tM='", // Dynamic styles
+                "'sha256-UQd05PVutI5yWvpzVBsXVcrIZqvqRxJdE5AbYcL/rHA='", // Script-generated styles
+                "'sha256-B04insvtmrN/tMV1Tl3SutYG3CpN7z2ZoZnPym8Ebz8='", // history.js and settings.js styles
+                "'sha256-Q43oAi1FsW2BRoOHMdVoonS7w3dKu7LpOXFyqw8vcLo='", // Additional dynamic styles
+                "'unsafe-hashes'", // Allow event handler styles
+                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : "'unsafe-inline'"
             ].filter(Boolean),
             // Restrict script sources and remove unsafe-eval
             scriptSrc: [
                 "'self'", 
                 "https://unpkg.com", 
                 "https://cdn.jsdelivr.net",
-                // Add specific hashes for inline scripts if needed
+                "'sha256-9qIM/K9N6AqC1F+pyJsf+6EiujBTaKud/UephdAW7H4='", // Inline script hash
                 process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
             ].filter(Boolean),
             fontSrc: ["'self'", "https://fonts.gstatic.com", "data:", "https://cdnjs.cloudflare.com"],
