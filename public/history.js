@@ -1,3 +1,4 @@
+// Version: 1.0.2 - Fixed BTC balance profit calculation consistency
 // History Page JavaScript
 let currentUser = null;
 let isLoggedIn = false;
@@ -141,20 +142,102 @@ async function loadUserData() {
         });
         
         if (response.ok) {
-            const userData = await response.json();
-            usdBalance = userData.usdBalance;
-            btcBalance = userData.btcBalance;
+            const apiResponse = await response.json();
+            console.log('History: Raw API response:', apiResponse);
+            
+            // Handle both old and new API response formats
+            const userData = apiResponse.data || apiResponse;
+            console.log('History: Processed user data:', userData);
+            console.log('History: userData.usdBalance:', userData.usdBalance, 'Type:', typeof userData.usdBalance);
+            console.log('History: userData.btcBalance:', userData.btcBalance, 'Type:', typeof userData.btcBalance);
+            
+            usdBalance = Number.isFinite(userData.usdBalance) ? userData.usdBalance : 10000;
+            btcBalance = Number.isFinite(userData.btcBalance) ? userData.btcBalance : 0;
             transactions = userData.transactions || [];
             userTimezone = userData.timezone || 'UTC';
             
+            console.log('History: Final balances - USD:', usdBalance, 'BTC:', btcBalance);
+            
         } else if (response.status === 401) {
             // Token expired or invalid
+            console.log('History: Token expired or invalid');
             isLoggedIn = false;
             logout();
+        } else {
+            console.error('History: Failed to load user data, status:', response.status);
+            const errorText = await response.text();
+            console.error('History: Error response:', errorText);
         }
     } catch (error) {
         console.error('Error loading user data:', error);
     }
+}
+
+// Calculate spot profit/loss for each cryptocurrency (same logic as main trading page)
+function calculateSpotProfitLoss() {
+    const spotProfits = {};
+    
+    // Process each market (assuming BTC for now)
+    ['BTC-USDT'].forEach(market => {
+        const [crypto] = market.split('-');
+        const currentBalance = btcBalance;
+        
+        if (currentBalance <= 0) {
+            spotProfits[crypto] = {
+                totalInvested: 0,
+                currentValue: 0,
+                profit: 0,
+                profitPercent: 0,
+                averageBuyPrice: 0
+            };
+            return;
+        }
+        
+        // Calculate average buy price from transactions (time-ordered)
+        const relevantTransactions = transactions.filter(tx => 
+            (tx.market === market || tx.market === `${crypto}/USDT` || tx.type === 'buy' || tx.type === 'sell') &&
+            (tx.type === 'buy' || tx.type === 'sell')
+        ).sort((a, b) => new Date(a.time) - new Date(b.time));
+        
+        let runningBalance = 0;
+        let averageBuyPrice = 0;
+        
+        // Process transactions in chronological order
+        relevantTransactions.forEach((tx) => {
+            if (tx.type === 'buy') {
+                // Calculate new weighted average buy price
+                const newBalance = runningBalance + (tx.amount || 0);
+                if (newBalance > 0) {
+                    averageBuyPrice = ((averageBuyPrice * runningBalance) + ((tx.price || 0) * (tx.amount || 0))) / newBalance;
+                }
+                runningBalance = newBalance;
+            } else if (tx.type === 'sell') {
+                // Sell reduces balance but keeps average buy price unchanged
+                runningBalance -= (tx.amount || 0);
+                if (runningBalance <= 0) {
+                    runningBalance = 0;
+                    averageBuyPrice = 0;
+                }
+            }
+        });
+        
+        // Use a placeholder current price (in real implementation, this would come from WebSocket)
+        const currentMarketPrice = 50000; // Placeholder BTC price
+        const currentValue = currentBalance * currentMarketPrice;
+        const totalInvested = currentBalance * averageBuyPrice;
+        const profit = currentValue - totalInvested;
+        const profitPercent = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
+        
+        spotProfits[crypto] = {
+            totalInvested,
+            currentValue,
+            profit,
+            profitPercent,
+            averageBuyPrice
+        };
+    });
+    
+    return spotProfits;
 }
 
 // Update balance display
@@ -162,22 +245,24 @@ function updateBalanceDisplay() {
     // Update balance displays
     const krwBalanceEl = document.getElementById('krw-balance');
     if (krwBalanceEl) {
-        krwBalanceEl.textContent = '$' + usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        let formattedUsdBalance;
+        try {
+            formattedUsdBalance = Number.isFinite(usdBalance) ? 
+                usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        } catch (error) {
+            console.error('Error formatting USD balance:', error, { usdBalance });
+            formattedUsdBalance = '0.00';
+        }
+        krwBalanceEl.textContent = '$' + formattedUsdBalance;
     }
     
     const btcBalanceEl = document.getElementById('btc-balance');
     if (btcBalanceEl) {
-        // Calculate profit/loss percentage based on initial value
-        const initialValue = 10000; // Initial USD balance
-        const currentBtcPrice = 50000; // Placeholder price, same as settings.js
-        const currentTotalValue = usdBalance + (btcBalance * currentBtcPrice);
-        const profitLossAmount = currentTotalValue - initialValue;
-        const profitLossPercentage = (profitLossAmount / initialValue) * 100;
-        const isProfit = profitLossAmount >= 0;
-        const percentageColor = isProfit ? 'var(--accent-green)' : 'var(--accent-red)';
-        const sign = isProfit ? '+' : '';
-        
-        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)} <span class="${isProfit ? 'profit-text' : 'loss-text'}">(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
+        // Calculate BTC profit using same logic as main trading page
+        const btcProfit = calculateSpotProfitLoss()['BTC'] || { profitPercent: 0 };
+        const btcProfitText = btcProfit.profitPercent !== 0 ? 
+            ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
+        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
     }
 }
 
@@ -429,21 +514,31 @@ function renderTransactionTable(transactionList) {
             typeClass = transaction.type;
             typeText = transaction.type.toUpperCase();
             amount = `${(transaction.amount || 0).toFixed(8)} BTC`;
-            price = `$${(transaction.price || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
-            total = `$${(transaction.total || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
-            fee = `$${(transaction.fee || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+            
+            const transactionPrice = transaction.price || 0;
+            const transactionTotal = transaction.total || 0;
+            const transactionFee = transaction.fee || 0;
+            
+            price = `$${Number.isFinite(transactionPrice) ? transactionPrice.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            total = `$${Number.isFinite(transactionTotal) ? transactionTotal.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            fee = `$${Number.isFinite(transactionFee) ? transactionFee.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
             pnl = '-';
         } else if (transaction.type?.startsWith('close_')) {
             const positionType = transaction.type.replace('close_', '');
             typeClass = 'close';
             typeText = `CLOSE ${positionType.toUpperCase()}`;
             amount = `${transaction.leverage}x Leverage`;
-            price = `$${(transaction.exitPrice || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
-            total = `${transaction.percentage || 100}% Close`;
-            fee = `$${(transaction.openingFee || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+            
+            const exitPrice = transaction.exitPrice || 0;
+            const openingFee = transaction.openingFee || 0;
             const pnlValue = transaction.pnl || 0;
+            
+            price = `$${Number.isFinite(exitPrice) ? exitPrice.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            total = `${transaction.percentage || 100}% Close`;
+            fee = `$${Number.isFinite(openingFee) ? openingFee.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            const formattedPnl = Number.isFinite(pnlValue) ? pnlValue.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
             pnl = `<span class="${pnlValue >= 0 ? 'pnl-positive' : 'pnl-negative'}">
-                ${pnlValue >= 0 ? '+' : ''}$${pnlValue.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                ${pnlValue >= 0 ? '+' : ''}$${formattedPnl}
             </span>`;
         } else {
             typeClass = 'neutral';
@@ -528,11 +623,13 @@ function calculateTradingStats() {
     const winRate = totalTrades > 0 ? ((winningTrades / totalTrades) * 100) : 0;
     const avgPnl = (winningTrades + losingTrades) > 0 ? (totalPnl / (winningTrades + losingTrades)) : 0;
     
-    // Update displays
-    document.getElementById('total-assets').textContent = '$' + currentAssets.toLocaleString('en-US', {minimumFractionDigits: 2});
+    // Update displays with safe formatting
+    const formattedAssets = Number.isFinite(currentAssets) ? currentAssets.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+    document.getElementById('total-assets').textContent = '$' + formattedAssets;
     document.getElementById('total-assets').className = 'stat-value';
     
-    document.getElementById('total-pnl').textContent = (totalReturn >= 0 ? '+' : '') + '$' + totalReturn.toLocaleString('en-US', {minimumFractionDigits: 2});
+    const formattedTotalReturn = Number.isFinite(totalReturn) ? totalReturn.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+    document.getElementById('total-pnl').textContent = (totalReturn >= 0 ? '+' : '') + '$' + formattedTotalReturn;
     document.getElementById('total-pnl').className = `stat-value ${totalReturn >= 0 ? 'positive' : 'negative'}`;
     
     document.getElementById('total-return').textContent = (totalReturnPercent >= 0 ? '+' : '') + totalReturnPercent.toFixed(2) + '%';
@@ -542,8 +639,12 @@ function calculateTradingStats() {
     document.getElementById('winning-trades').textContent = winningTrades.toString();
     document.getElementById('losing-trades').textContent = losingTrades.toString();
     document.getElementById('win-rate').textContent = winRate.toFixed(1) + '%';
-    document.getElementById('avg-pnl').textContent = '$' + avgPnl.toLocaleString('en-US', {minimumFractionDigits: 2});
-    document.getElementById('total-fees').textContent = '$' + totalFees.toLocaleString('en-US', {minimumFractionDigits: 2});
+    
+    const formattedAvgPnl = Number.isFinite(avgPnl) ? avgPnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+    document.getElementById('avg-pnl').textContent = '$' + formattedAvgPnl;
+    
+    const formattedTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+    document.getElementById('total-fees').textContent = '$' + formattedTotalFees;
 }
 
 // Export transactions to CSV

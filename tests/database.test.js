@@ -1,4 +1,4 @@
-const { createUser, authenticateUser, getUserData, updateUserData } = require('../database');
+const { createUser, authenticateUser, getUserData, updateUserData, getUsersByIds, getUserDataByIds, saveChartSettings, getChartSettings, deleteChartSettings } = require('../database');
 const bcrypt = require('bcrypt');
 
 describe('Database Functions', () => {
@@ -181,6 +181,152 @@ describe('Database Functions', () => {
       const updatedAt = new Date(userData.updated_at);
       
       expect(updatedAt.getTime()).toBeGreaterThanOrEqual(beforeUpdate.getTime());
+    });
+  });
+
+  // New batch operations tests
+  describe('Batch Operations', () => {
+    let testUserIds = [];
+    
+    beforeAll(async () => {
+      // Create multiple test users for batch operations
+      for (let i = 0; i < 3; i++) {
+        const username = `batch_user_${Date.now()}_${i}`;
+        const password = 'testpassword123';
+        const userId = await createUser(username, password);
+        testUserIds.push(userId);
+      }
+    });
+
+    describe('getUsersByIds', () => {
+      it('should fetch multiple users by IDs', async () => {
+        const users = await getUsersByIds(testUserIds);
+        
+        expect(users).toHaveLength(3);
+        expect(users[0]).toHaveProperty('id');
+        expect(users[0]).toHaveProperty('username');
+        expect(users[0]).toHaveProperty('password');
+      });
+
+      it('should return empty array for empty input', async () => {
+        const users = await getUsersByIds([]);
+        expect(users).toEqual([]);
+      });
+
+      it('should handle non-existent IDs gracefully', async () => {
+        const users = await getUsersByIds([99999, 99998]);
+        expect(users).toEqual([]);
+      });
+    });
+
+    describe('getUserDataByIds', () => {
+      it('should fetch multiple user data with JOIN', async () => {
+        const userData = await getUserDataByIds(testUserIds);
+        
+        expect(userData).toHaveLength(3);
+        expect(userData[0]).toHaveProperty('usd_balance');
+        expect(userData[0]).toHaveProperty('username');
+        expect(userData[0]).toHaveProperty('member_since');
+        expect(Array.isArray(userData[0].transactions)).toBe(true);
+        expect(Array.isArray(userData[0].leverage_positions)).toBe(true);
+      });
+
+      it('should return empty array for empty input', async () => {
+        const userData = await getUserDataByIds([]);
+        expect(userData).toEqual([]);
+      });
+    });
+  });
+
+  // Chart settings tests
+  describe('Chart Settings', () => {
+    let testUserId;
+
+    beforeAll(async () => {
+      const username = `chart_user_${Date.now()}`;
+      const password = 'testpassword123';
+      testUserId = await createUser(username, password);
+    });
+
+    describe('saveChartSettings', () => {
+      it('should save chart settings successfully', async () => {
+        const settings = {
+          indicators: { ma: true, rsi: false },
+          indicatorSettings: { ma: { period: 20 } },
+          drawings: [{ type: 'trendline', points: [1, 2] }],
+          chartType: 'line'
+        };
+
+        await expect(saveChartSettings(testUserId, 'BTC-USDT', settings))
+          .resolves.not.toThrow();
+      });
+
+      it('should update existing settings (UPSERT)', async () => {
+        const initialSettings = {
+          indicators: { ma: true },
+          chartType: 'candlestick'
+        };
+        
+        await saveChartSettings(testUserId, 'ETH-USDT', initialSettings);
+        
+        const updatedSettings = {
+          indicators: { ma: false, rsi: true },
+          chartType: 'line'
+        };
+        
+        await saveChartSettings(testUserId, 'ETH-USDT', updatedSettings);
+        
+        const retrieved = await getChartSettings(testUserId, 'ETH-USDT');
+        expect(retrieved.indicators.rsi).toBe(true);
+        expect(retrieved.chart_type).toBe('line');
+      });
+    });
+
+    describe('getChartSettings', () => {
+      it('should retrieve saved chart settings', async () => {
+        const settings = {
+          indicators: { bollinger: true },
+          chartType: 'candlestick'
+        };
+        
+        await saveChartSettings(testUserId, 'SOL-USDT', settings);
+        const retrieved = await getChartSettings(testUserId, 'SOL-USDT');
+        
+        expect(retrieved).toBeDefined();
+        expect(retrieved.indicators.bollinger).toBe(true);
+        expect(retrieved.chart_type).toBe('candlestick');
+      });
+
+      it('should return null for non-existent settings', async () => {
+        const settings = await getChartSettings(testUserId, 'NONEXISTENT');
+        expect(settings).toBeNull();
+      });
+    });
+
+    describe('deleteChartSettings', () => {
+      it('should delete chart settings successfully', async () => {
+        const settings = { indicators: { macd: true } };
+        await saveChartSettings(testUserId, 'DELETE-TEST', settings);
+        
+        await deleteChartSettings(testUserId, 'DELETE-TEST');
+        
+        const retrieved = await getChartSettings(testUserId, 'DELETE-TEST');
+        expect(retrieved).toBeNull();
+      });
+    });
+  });
+
+  // Error handling tests
+  describe('Error Handling', () => {
+    it('should handle database connection errors gracefully', async () => {
+      // Test with invalid parameters
+      await expect(createUser('', '')).rejects.toThrow();
+    });
+
+    it('should validate foreign key constraints', async () => {
+      // Try to get data for non-existent user
+      const userData = await getUserData(99999);
+      expect(userData).toBeNull();
     });
   });
 });

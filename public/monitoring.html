@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SimStock - Performance Monitoring Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==">
     <link rel="stylesheet" href="styles.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -227,6 +228,69 @@
             gap: 8px;
             color: var(--text-secondary);
         }
+
+        /* New Alert Styles */
+        .alert-summary {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-red);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .alert-header {
+            background: rgba(239, 68, 68, 0.1);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--accent-red);
+        }
+
+        .alert-header i {
+            color: var(--accent-red);
+            margin-right: 10px;
+        }
+
+        .alert-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .alert-item {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .alert-item:last-child {
+            border-bottom: none;
+        }
+
+        .dismiss-btn, .dismiss-all-btn, .export-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            background: var(--accent-color);
+            color: white;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .dismiss-btn:hover, .dismiss-all-btn:hover, .export-btn:hover {
+            opacity: 0.8;
+        }
+
+        .refresh-select {
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0 10px;
+        }
     </style>
 </head>
 <body>
@@ -247,8 +311,27 @@
                         <input type="checkbox" id="auto-refresh" checked>
                         <label for="auto-refresh">Auto Refresh</label>
                     </div>
+                    <select id="refresh-interval" class="refresh-select">
+                        <option value="1000">1s</option>
+                        <option value="5000" selected>5s</option>
+                        <option value="10000">10s</option>
+                        <option value="30000">30s</option>
+                    </select>
+                    <button class="export-btn" onclick="exportMetrics()">
+                        <i class="fas fa-download"></i> Export
+                    </button>
                 </div>
             </div>
+        </div>
+
+        <!-- New Alert Summary Section -->
+        <div class="alert-summary" id="alert-summary" style="display: none;">
+            <div class="alert-header">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>Active Alerts</span>
+                <button class="dismiss-all-btn" onclick="dismissAllAlerts()">Dismiss All</button>
+            </div>
+            <div class="alert-list" id="alert-list"></div>
         </div>
 
         <div class="metrics-grid">

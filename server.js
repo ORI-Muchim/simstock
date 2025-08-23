@@ -16,6 +16,30 @@ const AlertManager = require('./monitoring/alert-manager');
 const logger = require('./utils/logger');
 const swaggerConfig = require('./config/swagger');
 
+// Standard API response utility
+const createAPIResponse = {
+    success: (data, message = null) => ({
+        success: true,
+        data,
+        message,
+        timestamp: new Date().toISOString()
+    }),
+    error: (message, errors = null, statusCode = 500) => ({
+        success: false,
+        error: message,
+        errors,
+        timestamp: new Date().toISOString(),
+        statusCode
+    }),
+    paginated: (data, pagination, message = null) => ({
+        success: true,
+        data,
+        pagination,
+        message,
+        timestamp: new Date().toISOString()
+    })
+};
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DEMO_MODE = process.env.DEMO_MODE === 'true' || false;
@@ -60,6 +84,11 @@ const authLimiter = rateLimit({
 
 // Security middleware
 app.use(helmet({
+    // Explicit security headers for better protection
+    frameguard: { action: 'deny' }, // X-Frame-Options: DENY
+    noSniff: true, // X-Content-Type-Options: nosniff
+    xssFilter: { mode: 'block' }, // X-XSS-Protection: 1; mode=block
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
@@ -76,7 +105,7 @@ app.use(helmet({
                 "'sha256-B04insvtmrN/tMV1Tl3SutYG3CpN7z2ZoZnPym8Ebz8='", // history.js and settings.js styles
                 "'sha256-Q43oAi1FsW2BRoOHMdVoonS7w3dKu7LpOXFyqw8vcLo='", // Additional dynamic styles
                 "'unsafe-hashes'", // Allow event handler styles
-                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : "'unsafe-inline'"
+                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
             ].filter(Boolean),
             // Restrict script sources and remove unsafe-eval
             scriptSrc: [
@@ -123,8 +152,8 @@ const corsOptions = {
                 'http://localhost:3001', // For development testing
             ];
         
-        // Log CORS requests for monitoring
-        if (origin) {
+        // Log CORS requests for monitoring (only in development)
+        if (origin && process.env.NODE_ENV === 'development') {
             console.log(`CORS request from origin: ${origin}`);
         }
         
@@ -236,6 +265,7 @@ const wss = new WebSocket.Server({ server });
 
 // OKX WebSocket Connection
 let okxWs = null;
+let okxWsPingInterval = null; // Track ping interval for cleanup
 let currentPrice = 0;
 let priceHistory = [];
 let candleData = [];
@@ -249,7 +279,7 @@ function connectOKXWebSocket() {
     okxWs = new WebSocket('wss://ws.okx.com:8443/ws/v5/public');
     
     okxWs.on('open', async () => {
-        console.log('Connected to OKX WebSocket');
+        logger.info('Connected to OKX WebSocket');
         
         // Subscribe to BTC ticker data
         const btcTickerSubscribe = {
@@ -281,11 +311,7 @@ function connectOKXWebSocket() {
         };
         okxWs.send(JSON.stringify(orderbookSubscribe));
         
-        // Note: OKX WebSocket candle channels appear to have subscription issues
-        // Current implementation uses scheduler-based API polling which provides real-time updates
-        console.log('OKX WebSocket candle subscription not working - using scheduler-based updates instead');
-        
-        console.log('Subscribed to BTC/ETH ticker, orderbook, and candle channels');
+        logger.info('Subscribed to BTC/ETH ticker, orderbook channels');
     });
     
     okxWs.on('message', (data) => {
@@ -293,27 +319,10 @@ function connectOKXWebSocket() {
             // Handle ping/pong messages
             const dataStr = data.toString();
             if (dataStr === 'pong') {
-                console.log('📡 OKX WebSocket pong received');
-                return; // Skip pong messages
+                return; // Skip pong messages silently
             }
             
             const message = JSON.parse(dataStr);
-            
-            // Debug: Log ALL incoming messages for diagnosis
-            console.log('📡 RAW OKX Message:', {
-                type: message.event || message.arg?.channel || 'unknown',
-                channel: message.arg?.channel,
-                instId: message.arg?.instId,
-                hasData: !!message.data,
-                dataLength: message.data?.length || 0
-            });
-            
-            // Debug: Log all incoming candle messages with volume
-            if (message.arg && (message.arg.channel === 'candlesticks' || message.arg.channel === 'candle1m' || message.arg.channel === 'candle' || message.arg.channel === 'kline')) {
-                const volume = message.data?.[0]?.[5];
-                const timestamp = message.data?.[0]?.[0];
-                console.log(`🔔 OKX Candle received: ${message.arg.instId} ${message.arg.channel} ${message.arg.interval || ''} - Volume: ${volume}, Time: ${new Date(parseInt(timestamp)).toISOString()}`);
-            }
             
             if (message.data && message.data.length > 0) {
                 const data = message.data[0];
@@ -327,10 +336,6 @@ function connectOKXWebSocket() {
                     // Calculate 24h change rate: (current - open) / open
                     const changeRate = open24h > 0 ? (price - open24h) / open24h : 0;
                     
-                    // Reduced logging - only log significant price changes
-                    // if (Math.abs(changeRate) > 0.01) { // Only log if change > 1%
-                    //     console.log(`${instId}: $${price.toFixed(2)} (${(changeRate * 100).toFixed(2)}%)`);
-                    // }
                     
                     // Update market prices
                     marketPrices[instId] = {
@@ -352,9 +357,10 @@ function connectOKXWebSocket() {
                             volume: parseFloat(data.vol24h)
                         });
                         
-                        // Keep only last 100 data points
-                        if (priceHistory.length > 100) {
-                            priceHistory.shift();
+                        // Keep only last 100 data points to prevent memory bloat
+                        const MAX_PRICE_HISTORY = 100;
+                        if (priceHistory.length > MAX_PRICE_HISTORY) {
+                            priceHistory = priceHistory.slice(-MAX_PRICE_HISTORY);
                         }
                     }
                     
@@ -423,7 +429,6 @@ function connectOKXWebSocket() {
                     };
                     
                     // Broadcast real-time candle update
-                    console.log(`⚡ Broadcasting candle: ${instId} ${mappedInterval} - O:${candleData.open} H:${candleData.high} L:${candleData.low} C:${candleData.close} V:${candleData.volume}`);
                     broadcastToClients({
                         type: 'candle_update',
                         instId: instId,
@@ -470,45 +475,96 @@ function connectOKXWebSocket() {
     
     okxWs.on('close', (code, reason) => {
         logger.info(`OKX WebSocket disconnected (code: ${code}, reason: ${reason}). Reconnecting in 5 seconds...`);
+        
+        // Cleanup existing ping interval
+        if (okxWsPingInterval) {
+            clearInterval(okxWsPingInterval);
+            okxWsPingInterval = null;
+        }
+        
         setTimeout(connectOKXWebSocket, 5000);
     });
     
+    // Cleanup any existing ping interval before creating new one
+    if (okxWsPingInterval) {
+        clearInterval(okxWsPingInterval);
+    }
+    
     // Ping every 25 seconds to keep connection alive
-    setInterval(() => {
+    okxWsPingInterval = setInterval(() => {
         if (okxWs && okxWs.readyState === WebSocket.OPEN) {
             okxWs.send('ping');
         }
     }, 25000);
 }
 
-// Helper function to broadcast to all clients
+// Helper function to broadcast to all clients with optimizations
 function broadcastToClients(data) {
     let sentCount = 0;
     let totalClients = 0;
     let openClients = 0;
+    let deadClients = [];
+    
+    // Pre-serialize data once instead of per client
+    const serializedData = JSON.stringify(data);
     
     wss.clients.forEach(client => {
         totalClients++;
         if (client.readyState === WebSocket.OPEN) {
             openClients++;
             if (!client.isMonitoringClient) {
-                client.send(JSON.stringify(data));
-                sentCount++;
+                try {
+                    client.send(serializedData);
+                    sentCount++;
+                } catch (error) {
+                    logger.warn('Failed to send message to client', error.message);
+                    deadClients.push(client);
+                }
             }
+        } else if (client.readyState === WebSocket.CLOSED || client.readyState === WebSocket.CLOSING) {
+            deadClients.push(client);
         }
     });
     
-    // 🔍 DEBUG: candle_update 메시지만 로깅
-    if (data.type === 'candle_update') {
-        console.log(`🔍 Broadcast ${data.instId} ${data.interval} to ${sentCount}/${openClients} clients - V:${data.data.volume}`);
+    // Clean up dead connections to prevent memory leaks
+    deadClients.forEach(client => {
+        try {
+            client.terminate();
+        } catch (e) {
+            // Ignore errors during cleanup
+        }
+    });
+    
+    // Log only errors in broadcast
+    if (sentCount === 0 && openClients > 0) {
+        logger.warn(`Failed to broadcast ${data.type} to ${openClients} clients`);
     }
 }
 
 // Helper function to broadcast to monitoring dashboard clients
 function broadcastToMonitoringClients(data) {
+    const serializedData = JSON.stringify(data);
+    let deadClients = [];
+    
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isMonitoringClient) {
-            client.send(JSON.stringify(data));
+            try {
+                client.send(serializedData);
+            } catch (error) {
+                logger.warn('Failed to send monitoring data to client', error.message);
+                deadClients.push(client);
+            }
+        } else if (client.readyState === WebSocket.CLOSED || client.readyState === WebSocket.CLOSING) {
+            deadClients.push(client);
+        }
+    });
+    
+    // Clean up dead monitoring connections
+    deadClients.forEach(client => {
+        try {
+            client.terminate();
+        } catch (e) {
+            // Ignore errors during cleanup
         }
     });
 }
@@ -580,10 +636,10 @@ dataScheduler.collectInitialData().then(() => {
 app.get('/api/monitoring/status', (req, res) => {
     try {
         const status = performanceMonitor.getStatus();
-        res.json(status);
+        res.json(createAPIResponse.success(status, 'Monitoring status retrieved successfully'));
     } catch (error) {
         console.error('Error getting monitoring status:', error);
-        res.status(500).json({ error: 'Failed to get monitoring status' });
+        res.status(500).json(createAPIResponse.error('Failed to get monitoring status', null, 500));
     }
 });
 
@@ -599,10 +655,10 @@ app.get('/api/monitoring/metrics/:type', (req, res) => {
             metrics = performanceMonitor.metrics[type] || [];
         }
         
-        res.json(metrics);
+        res.json(createAPIResponse.success(metrics, 'Metrics retrieved successfully'));
     } catch (error) {
         console.error('Error getting metrics:', error);
-        res.status(500).json({ error: 'Failed to get metrics' });
+        res.status(500).json(createAPIResponse.error('Failed to get metrics', null, 500));
     }
 });
 
@@ -623,17 +679,17 @@ app.get('/api/monitoring/export/:type', (req, res) => {
         res.send(data);
     } catch (error) {
         console.error('Error exporting metrics:', error);
-        res.status(500).json({ error: 'Failed to export metrics' });
+        res.status(500).json(createAPIResponse.error('Failed to export metrics', null, 500));
     }
 });
 
 app.post('/api/monitoring/reset-counters', (req, res) => {
     try {
         performanceMonitor.resetCounters();
-        res.json({ success: true, message: 'Counters reset successfully' });
+        res.json(createAPIResponse.success(null, 'Counters reset successfully'));
     } catch (error) {
         console.error('Error resetting counters:', error);
-        res.status(500).json({ error: 'Failed to reset counters' });
+        res.status(500).json(createAPIResponse.error('Failed to reset counters', null, 500));
     }
 });
 
@@ -673,10 +729,10 @@ app.post('/api/monitoring/reset-counters', (req, res) => {
 app.get('/api/monitoring/alerts', (req, res) => {
     try {
         const activeAlerts = alertManager.getActiveAlerts();
-        res.json(activeAlerts);
+        res.json(createAPIResponse.success(activeAlerts, 'Active alerts retrieved successfully'));
     } catch (error) {
         logger.error('Error getting alerts:', error);
-        res.status(500).json({ error: 'Failed to get alerts' });
+        res.status(500).json(createAPIResponse.error('Failed to get alerts', null, 500));
     }
 });
 
@@ -703,10 +759,10 @@ app.get('/api/monitoring/alerts/history', (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 100;
         const history = alertManager.getAlertHistory(limit);
-        res.json(history);
+        res.json(createAPIResponse.success(history, 'Alert history retrieved successfully'));
     } catch (error) {
         logger.error('Error getting alert history:', error);
-        res.status(500).json({ error: 'Failed to get alert history' });
+        res.status(500).json(createAPIResponse.error('Failed to get alert history', null, 500));
     }
 });
 
@@ -725,10 +781,10 @@ app.get('/api/monitoring/alerts/history', (req, res) => {
 app.get('/api/monitoring/alerts/stats', (req, res) => {
     try {
         const stats = alertManager.getAlertStats();
-        res.json(stats);
+        res.json(createAPIResponse.success(stats, 'Alert statistics retrieved successfully'));
     } catch (error) {
         logger.error('Error getting alert stats:', error);
-        res.status(500).json({ error: 'Failed to get alert stats' });
+        res.status(500).json(createAPIResponse.error('Failed to get alert stats', null, 500));
     }
 });
 
@@ -752,37 +808,80 @@ app.get('/404.html', (req, res) => {
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               additionalProperties:
- *                 $ref: '#/components/schemas/MarketPrice'
+ *               allOf:
+ *                 - $ref: '#/components/schemas/StandardAPIResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       additionalProperties:
+ *                         $ref: '#/components/schemas/MarketPrice'
  *             example:
- *               BTC-USDT:
- *                 price: 45000
- *                 change: 500
- *                 change_rate: 0.011
- *                 high_price: 46000
- *                 low_price: 44000
- *                 volume: 1500000
+ *               success: true
+ *               message: "Market prices retrieved successfully"
+ *               timestamp: "2025-08-23T10:25:31.868Z"
+ *               data:
+ *                 BTC-USDT:
+ *                   price: 45000
+ *                   change: 500
+ *                   change_rate: 0.011
+ *                   high_price: 46000
+ *                   low_price: 44000
+ *                   volume: 1500000
  */
 // Get all market prices
 app.get('/api/markets', (req, res) => {
-    res.json(marketPrices);
+    res.json(createAPIResponse.success(marketPrices, 'Market prices retrieved successfully'));
 });
 
+/**
+ * @swagger
+ * /api/price/{market}:
+ *   get:
+ *     tags:
+ *       - Market Data
+ *     summary: Get price for specific market
+ *     description: Retrieve current price data for a specific trading pair
+ *     parameters:
+ *       - in: path
+ *         name: market
+ *         schema:
+ *           type: string
+ *           default: BTC-USDT
+ *         description: Trading pair (e.g., BTC-USDT, ETH-USDT)
+ *     responses:
+ *       200:
+ *         description: Price data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/StandardAPIResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/MarketPrice'
+ *       500:
+ *         description: Failed to fetch price
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StandardAPIError'
+ */
 // Get current price for specific market
 app.get('/api/price/:market?', async (req, res) => {
     try {
         const market = req.params.market || 'BTC-USDT';
         const response = await axios.get(`https://www.okx.com/api/v5/market/ticker?instId=${market}`);
-        res.json(response.data.data[0]);
+        res.json(createAPIResponse.success(response.data.data[0], 'Price data retrieved successfully'));
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch price' });
+        res.status(500).json(createAPIResponse.error('Failed to fetch price', null, 500));
     }
 });
 
 // Get price history
 app.get('/api/history', (req, res) => {
-    res.json(priceHistory);
+    res.json(createAPIResponse.success(priceHistory, 'Price history retrieved successfully'));
 });
 
 // Get order book
@@ -790,9 +889,9 @@ app.get('/api/orderbook/:market?', async (req, res) => {
     try {
         const market = req.params.market || 'BTC-USDT';
         const response = await axios.get(`https://www.okx.com/api/v5/market/books?instId=${market}&sz=400`);
-        res.json(response.data.data[0]);
+        res.json(createAPIResponse.success(response.data.data[0], 'Order book retrieved successfully'));
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch orderbook' });
+        res.status(500).json(createAPIResponse.error('Failed to fetch orderbook', null, 500));
     }
 });
 
@@ -873,10 +972,9 @@ app.get('/api/candles/:interval', async (req, res) => {
                     }))
                     .sort((a, b) => a.time - b.time); // Sort by time ascending
                 
-                console.log(`Found ${dbCandles.length} candles in database for ${market} ${bar}`);
             }
         } catch (dbError) {
-            console.log('Database fetch error:', dbError.message);
+            logger.debug('Database fetch error:', dbError.message);
         }
         
         // Step 2: Get latest candles from API to fill any gaps
@@ -895,9 +993,8 @@ app.get('/api/candles/:interval', async (req, res) => {
                 volume: parseFloat(candle[5])
             }));
             
-            console.log(`Fetched ${apiCandles.length} latest candles from API for ${market} ${bar}`);
         } catch (apiError) {
-            console.log('API fetch error (using DB only):', apiError.message);
+            logger.debug('API fetch error (using DB only):', apiError.message);
         }
         
         // Step 3: Merge data - DB data + new API data (avoiding duplicates)
@@ -910,7 +1007,6 @@ app.get('/api/candles/:interval', async (req, res) => {
             const newApiCandles = apiCandles.filter(c => c.time > latestDbTime);
             if (newApiCandles.length > 0) {
                 mergedCandles = [...dbCandles, ...newApiCandles];
-                console.log(`Added ${newApiCandles.length} new candles from API`);
                 
                 // Save new candles to database for future use
                 if (dataScheduler && dataScheduler.collector && newApiCandles.length > 0) {
@@ -932,20 +1028,23 @@ app.get('/api/candles/:interval', async (req, res) => {
             // If DB was empty, use all API candles
             if (dbCandles.length === 0 && apiCandles.length > 0) {
                 mergedCandles = apiCandles;
-                console.log(`Using ${apiCandles.length} candles from API (DB was empty)`);
             }
         }
         
         // Sort and send final result
         mergedCandles.sort((a, b) => a.time - b.time);
         
-        // Sort and send final result (remove unnecessary volume scaling)
-        console.log(`Total: Serving ${mergedCandles.length} candles (${dbCandles.length} from DB + ${mergedCandles.length - dbCandles.length} from API)`);
+        // Limit response size to prevent memory issues
+        const MAX_CANDLES_RESPONSE = 5000;
+        if (mergedCandles.length > MAX_CANDLES_RESPONSE) {
+            mergedCandles = mergedCandles.slice(-MAX_CANDLES_RESPONSE);
+            logger.warn(`Candle response truncated from ${mergedCandles.length} to ${MAX_CANDLES_RESPONSE} points`);
+        }
         
-        res.json(mergedCandles);
+        res.json(createAPIResponse.success(mergedCandles, `Candle data retrieved successfully (${mergedCandles.length} points)`));
     } catch (error) {
         console.error('Failed to fetch candles:', error);
-        res.status(500).json({ error: 'Failed to fetch candle data' });
+        res.status(500).json(createAPIResponse.error('Failed to fetch candle data', null, 500));
     }
 });
 
@@ -955,11 +1054,11 @@ const authenticateToken = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
     
     if (!token) {
-        return res.status(401).json({ error: 'Authentication required' });
+        return res.status(401).json(createAPIResponse.error('Authentication required', null, 401));
     }
     
     jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).json({ error: 'Invalid token' });
+        if (err) return res.status(403).json(createAPIResponse.error('Invalid token', null, 403));
         req.user = user;
         next();
     });
@@ -1028,7 +1127,7 @@ app.post('/api/register',
             // Check validation errors
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
-                return res.status(400).json({ errors: errors.array() });
+                return res.status(400).json(createAPIResponse.error('Validation failed', errors.array(), 400));
             }
             
             const { username, password } = req.body;
@@ -1037,13 +1136,13 @@ app.post('/api/register',
             const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
             
             logger.info(`New user registered: ${username}`);
-            res.json({ token, username });
+            res.json(createAPIResponse.success({ token, username }, 'User registered successfully'));
         } catch (error) {
             if (error.code === 'SQLITE_CONSTRAINT') {
-                res.status(400).json({ error: 'This username is already taken' });
+                res.status(400).json(createAPIResponse.error('This username is already taken', null, 400));
             } else {
                 logger.error('Registration error:', error);
-                res.status(500).json({ error: 'Registration failed. Please try again later' });
+                res.status(500).json(createAPIResponse.error('Registration failed. Please try again later', null, 500));
             }
         }
     }
@@ -1099,7 +1198,7 @@ app.post('/api/login',
             // Check validation errors
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
-                return res.status(400).json({ errors: errors.array() });
+                return res.status(400).json(createAPIResponse.error('Validation failed', errors.array(), 400));
             }
             
             const { username, password } = req.body;
@@ -1108,15 +1207,15 @@ app.post('/api/login',
             
             if (!user) {
                 logger.warn(`Failed login attempt for username: ${username}`);
-                return res.status(401).json({ error: 'Incorrect username or password' });
+                return res.status(401).json(createAPIResponse.error('Incorrect username or password', null, 401));
             }
             
             const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
             logger.info(`User logged in: ${username}`);
-            res.json({ token, username: user.username });
+            res.json(createAPIResponse.success({ token, username: user.username }, 'Login successful'));
         } catch (error) {
             logger.error('Login error:', error);
-            res.status(500).json({ error: 'Login failed. Please try again later' });
+            res.status(500).json(createAPIResponse.error('Login failed. Please try again later', null, 500));
         }
     }
 );
@@ -1151,20 +1250,21 @@ app.get('/api/user/data', authenticateToken, async (req, res) => {
         const userData = await getUserData(req.user.id);
         
         if (!userData) {
-            return res.status(404).json({ error: 'User data not found' });
+            return res.status(404).json(createAPIResponse.error('User data not found', null, 404));
         }
         
-        res.json({
+        const responseData = {
             usdBalance: userData.usd_balance,
             btcBalance: userData.btc_balance,
             transactions: userData.transactions,
             leveragePositions: userData.leverage_positions,
             timezone: userData.timezone || 'UTC',
             memberSince: userData.member_since
-        });
+        };
+        res.json(createAPIResponse.success(responseData, 'User data retrieved successfully'));
     } catch (error) {
         console.error('Error fetching user data:', error);
-        res.status(500).json({ error: 'Failed to fetch user data' });
+        res.status(500).json(createAPIResponse.error('Failed to fetch user data', null, 500));
     }
 });
 
@@ -1172,13 +1272,82 @@ app.get('/api/user/data', authenticateToken, async (req, res) => {
 app.post('/api/user/data', authenticateToken, async (req, res) => {
     try {
         await updateUserData(req.user.id, req.body);
-        res.json({ success: true });
+        res.json(createAPIResponse.success(null, 'User data updated successfully'));
     } catch (error) {
         console.error('Error updating user data:', error);
-        res.status(500).json({ error: 'Failed to update user data' });
+        res.status(500).json(createAPIResponse.error('Failed to update user data', null, 500));
     }
 });
 
+/**
+ * @swagger
+ * /api/chart/settings:
+ *   post:
+ *     tags:
+ *       - Chart Settings
+ *     summary: Save chart settings
+ *     description: Save user's chart configuration including indicators and drawings
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - market
+ *             properties:
+ *               market:
+ *                 type: string
+ *                 example: "BTC-USDT"
+ *                 description: Trading pair
+ *               indicators:
+ *                 type: object
+ *                 additionalProperties:
+ *                   type: boolean
+ *                 example: {"ma": true, "rsi": false}
+ *               indicatorSettings:
+ *                 type: object
+ *                 additionalProperties:
+ *                   type: object
+ *                 example: {"ma": {"period": 20}}
+ *               drawings:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                 example: [{"type": "trendline", "points": [1, 2]}]
+ *               chartType:
+ *                 type: string
+ *                 enum: [candlestick, line, area]
+ *                 default: candlestick
+ *     responses:
+ *       200:
+ *         description: Chart settings saved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/StandardAPIResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: "null"
+ *       400:
+ *         description: Market is required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StandardAPIError'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         description: Failed to save chart settings
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StandardAPIError'
+ */
 // Chart settings APIs
 // Save chart settings
 app.post('/api/chart/settings', authenticateToken, async (req, res) => {
@@ -1186,7 +1355,7 @@ app.post('/api/chart/settings', authenticateToken, async (req, res) => {
         const { market, indicators, indicatorSettings, drawings, chartType } = req.body;
         
         if (!market) {
-            return res.status(400).json({ error: 'Market is required' });
+            return res.status(400).json(createAPIResponse.error('Market is required', null, 400));
         }
 
         await saveChartSettings(req.user.id, market, {
@@ -1196,10 +1365,10 @@ app.post('/api/chart/settings', authenticateToken, async (req, res) => {
             chartType
         });
         
-        res.json({ success: true });
+        res.json(createAPIResponse.success(null, 'User data updated successfully'));
     } catch (error) {
         console.error('Error saving chart settings:', error);
-        res.status(500).json({ error: 'Failed to save chart settings' });
+        res.status(500).json(createAPIResponse.error('Failed to save chart settings', null, 500));
     }
 });
 
@@ -1209,10 +1378,10 @@ app.get('/api/chart/settings/:market', authenticateToken, async (req, res) => {
         const { market } = req.params;
         const settings = await getChartSettings(req.user.id, market);
         
-        res.json({ success: true, settings: settings || null });
+        res.json(createAPIResponse.success(settings || null, 'Chart settings retrieved successfully'));
     } catch (error) {
         console.error('Error getting chart settings:', error);
-        res.status(500).json({ error: 'Failed to get chart settings' });
+        res.status(500).json(createAPIResponse.error('Failed to get chart settings', null, 500));
     }
 });
 
@@ -1222,10 +1391,10 @@ app.delete('/api/chart/settings/:market', authenticateToken, async (req, res) =>
         const { market } = req.params;
         await deleteChartSettings(req.user.id, market);
         
-        res.json({ success: true });
+        res.json(createAPIResponse.success(null, 'User data updated successfully'));
     } catch (error) {
         console.error('Error deleting chart settings:', error);
-        res.status(500).json({ error: 'Failed to delete chart settings' });
+        res.status(500).json(createAPIResponse.error('Failed to delete chart settings', null, 500));
     }
 });
 
@@ -1234,7 +1403,7 @@ wss.on('connection', (ws, req) => {
     // Initially assume it's a trading client
     ws.isMonitoringClient = false;
     
-    console.log('New client connected');
+    logger.debug('New WebSocket client connected');
     
     // Send current price immediately (will be ignored by monitoring clients)
     if (currentPrice > 0) {
@@ -1252,11 +1421,10 @@ wss.on('connection', (ws, req) => {
             if (data.type === 'client_identification' && data.clientType === 'monitoring') {
                 // Convert to monitoring client
                 ws.isMonitoringClient = true;
-                console.log('Client identified as monitoring dashboard');
+                logger.debug('Client identified as monitoring dashboard');
                 
                 // Send current performance status
                 const status = performanceMonitor.getStatus();
-                console.log('Sending performance data:', JSON.stringify(status, null, 2));
                 ws.send(JSON.stringify({
                     type: 'performance_metrics',
                     data: status
@@ -1281,9 +1449,9 @@ wss.on('connection', (ws, req) => {
     
     ws.on('close', () => {
         if (ws.isMonitoringClient) {
-            console.log('Monitoring client disconnected');
+            logger.debug('Monitoring client disconnected');
         } else {
-            console.log('Trading client disconnected');
+            logger.debug('Trading client disconnected');
         }
         
         // Update connection count
@@ -1317,7 +1485,7 @@ app.use((err, req, res, next) => {
 app.use((req, res) => {
     // Check if request is for an API endpoint
     if (req.path.startsWith('/api/')) {
-        res.status(404).json({ error: 'API endpoint not found' });
+        res.status(404).json(createAPIResponse.error('API endpoint not found', null, 404));
     } 
     // Check if request accepts HTML (browser request)
     else if (req.accepts('html')) {
@@ -1325,7 +1493,7 @@ app.use((req, res) => {
     } 
     // Default to JSON response
     else {
-        res.status(404).json({ error: 'Route not found' });
+        res.status(404).json(createAPIResponse.error('Route not found', null, 404));
     }
 });
 
@@ -1343,6 +1511,12 @@ process.on('SIGINT', () => {
     
     if (okxWs) {
         okxWs.close();
+    }
+    
+    // Cleanup ping interval
+    if (okxWsPingInterval) {
+        clearInterval(okxWsPingInterval);
+        okxWsPingInterval = null;
     }
     
     dataScheduler.stop();

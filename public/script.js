@@ -1,9 +1,17 @@
+// Version: 1.0.4 - Fixed Close All button functionality
+// Last Updated: 2025-08-23 20:03:00
 // Global variables
 let ws = null;
 let currentPrice = 0;
 let usdBalance = 1000; // Starting balance $1000
 let btcBalance = 0;
 let ethBalance = 0;
+
+// Safety function to ensure numeric values
+function ensureNumeric(value, defaultValue = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : defaultValue;
+}
 let currentMarket = 'BTC/USDT';
 let currentCryptoBalance = 0;
 // Store prices for each market
@@ -162,6 +170,16 @@ let isLoggedIn = false;
 // Initialize application
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, initializing...');
+    
+    // Ensure global variables are safely initialized
+    usdBalance = ensureNumeric(usdBalance, 10000);
+    btcBalance = ensureNumeric(btcBalance, 0);
+    ethBalance = ensureNumeric(ethBalance, 0);
+    transactions = Array.isArray(transactions) ? transactions : [];
+    leveragePositions = Array.isArray(leveragePositions) ? leveragePositions : [];
+    
+    console.log('Global variables initialized safely:', { usdBalance, btcBalance, ethBalance });
+    
     checkLoginStatus();
     setupPageNavigation();
     setupOrderTypeSelector();
@@ -322,14 +340,26 @@ function updateDropdownSelection() {
 
 // Update market card with real-time data
 function updateMarketCard(instId, data) {
+    if (!data) {
+        console.warn('updateMarketCard called with invalid data:', data);
+        return;
+    }
+    
     const market = instId.toLowerCase().replace('-usdt', '');
     const prefix = market;
     
     const priceEl = document.getElementById(`${prefix}-market-price`);
-    if (priceEl) priceEl.textContent = `$${data.price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (priceEl && data.price && Number.isFinite(data.price)) {
+        try {
+            priceEl.textContent = `$${data.price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        } catch (error) {
+            console.error('Error updating market price:', error, { instId, price: data.price });
+            priceEl.textContent = '$0.00';
+        }
+    }
     
     const changeEl = document.getElementById(`${prefix}-market-change`);
-    if (changeEl) {
+    if (changeEl && Number.isFinite(data.change_rate)) {
         changeEl.textContent = `${(data.change_rate * 100).toFixed(2)}%`;
         changeEl.className = data.change_rate >= 0 ? 'market-change positive' : 'market-change negative';
     }
@@ -338,10 +368,24 @@ function updateMarketCard(instId, data) {
     if (volumeEl) volumeEl.textContent = formatVolume(data.volume);
     
     const highEl = document.getElementById(`${prefix}-market-high`);
-    if (highEl) highEl.textContent = `$${data.high_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (highEl && data.high_price && Number.isFinite(data.high_price)) {
+        try {
+            highEl.textContent = `$${data.high_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        } catch (error) {
+            console.error('Error updating market high price:', error, { instId, high_price: data.high_price });
+            highEl.textContent = '$0.00';
+        }
+    }
     
     const lowEl = document.getElementById(`${prefix}-market-low`);
-    if (lowEl) lowEl.textContent = `$${data.low_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (lowEl && data.low_price && Number.isFinite(data.low_price)) {
+        try {
+            lowEl.textContent = `$${data.low_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        } catch (error) {
+            console.error('Error updating market low price:', error, { instId, low_price: data.low_price });
+            lowEl.textContent = '$0.00';
+        }
+    }
 }
 
 // Select market and switch to trade page
@@ -650,12 +694,22 @@ async function loadUserData() {
         });
         
         if (response.ok) {
-            const userData = await response.json();
-            usdBalance = userData.usdBalance;
-            btcBalance = userData.btcBalance;
-            transactions = userData.transactions || [];
-            leveragePositions = userData.leveragePositions || [];
+            const apiResponse = await response.json();
+            // Handle both old and new API response formats
+            const userData = apiResponse.data || apiResponse;
+            
+            usdBalance = ensureNumeric(userData.usdBalance, 10000); // Default $10,000
+            btcBalance = ensureNumeric(userData.btcBalance, 0);
+            ethBalance = ensureNumeric(userData.ethBalance, 0); // Also set ethBalance
+            transactions = Array.isArray(userData.transactions) ? userData.transactions : [];
+            leveragePositions = Array.isArray(userData.leveragePositions) ? userData.leveragePositions : [];
             userTimezone = userData.timezone || 'UTC';
+            
+            console.log('User data loaded successfully:', { 
+                usdBalance, btcBalance, ethBalance, 
+                transactionCount: transactions.length, 
+                positionCount: leveragePositions.length 
+            });
             
             // Save timezone to localStorage
             localStorage.setItem('timezone', userTimezone);
@@ -757,27 +811,35 @@ function initializeWebSocket() {
         
         switch(data.type) {
             case 'price_update':
-                if (data.instId) {
+                if (data.instId && data.data) {
                     // Handle market-specific price updates
                     const market = data.instId.replace('-', '/');
                     
                     // Always store the price for this market
-                    marketPrices[market] = data.data.price;
+                    if (data.data.price) {
+                        marketPrices[market] = data.data.price;
+                    }
                     
                     if (market === currentMarket) {
                         updatePrice(data.data);
                     }
                     // Update markets page if visible
-                    if (document.getElementById('markets-page').style.display !== 'none') {
+                    if (document.getElementById('markets-page') && document.getElementById('markets-page').style.display !== 'none') {
                         updateMarketCard(data.instId, data.data);
                     }
-                } else {
+                } else if (data.data) {
                     // Legacy support for BTC-only updates
                     updatePrice(data.data);
+                } else {
+                    console.warn('Received price_update without data:', data);
                 }
                 break;
             case 'orderbook_update':
-                updateOrderbook(data.data);
+                if (data.data) {
+                    updateOrderbook(data.data);
+                } else {
+                    console.warn('Received orderbook_update without data:', data);
+                }
                 break;
             case 'candle_update':
                 if (data.instId) {
@@ -1014,6 +1076,9 @@ function setupEventListeners() {
     document.getElementById('sell-btn').addEventListener('click', executeSell);
     document.getElementById('open-position-btn').addEventListener('click', openLeveragePosition);
     
+    // Close All positions button
+    document.querySelector('.close-all-btn').addEventListener('click', closeAllPositions);
+    
     // Percentage buttons for selling
     document.querySelectorAll('.percentage-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -1205,8 +1270,15 @@ function updatePrice(data) {
     // Store price for current market
     marketPrices[currentMarket] = currentPrice;
     
-    // Update price display in USD (USDT ≈ USD)
-    document.getElementById('btc-price').textContent = '$' + currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    // Update price display in USD (USDT ≈ USD) with safety check
+    try {
+        const btcPriceEl = document.getElementById('btc-price');
+        if (btcPriceEl && Number.isFinite(currentPrice)) {
+            btcPriceEl.textContent = '$' + currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+    } catch (error) {
+        console.error('Error updating btc-price:', error, { currentPrice });
+    }
     
     // Update price change
     if (data.change_rate !== undefined && data.change_rate !== null) {
@@ -1219,12 +1291,26 @@ function updatePrice(data) {
         console.log('change_rate is missing or null in data:', data);
     }
     
-    // Update stats in USD
-    if (data.high_price) {
-        document.getElementById('high-price').textContent = '$' + data.high_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    // Update stats in USD with proper safety checks
+    if (data.high_price && Number.isFinite(data.high_price)) {
+        try {
+            const highPriceEl = document.getElementById('high-price');
+            if (highPriceEl) {
+                highPriceEl.textContent = '$' + data.high_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
+        } catch (error) {
+            console.error('Error updating high-price:', error, { high_price: data.high_price });
+        }
     }
-    if (data.low_price) {
-        document.getElementById('low-price').textContent = '$' + data.low_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    if (data.low_price && Number.isFinite(data.low_price)) {
+        try {
+            const lowPriceEl = document.getElementById('low-price');
+            if (lowPriceEl) {
+                lowPriceEl.textContent = '$' + data.low_price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            }
+        } catch (error) {
+            console.error('Error updating low-price:', error, { low_price: data.low_price });
+        }
     }
     if (data.volume) {
         const volumeElement = document.getElementById('volume');
@@ -1380,7 +1466,7 @@ function updateOrderbookSide(container, orders, type, isReversed) {
         row.innerHTML = `
             <span class="orderbook-price">$${formattedPrice}</span>
             <span class="orderbook-size">${sizeNum.toFixed(8)}</span>
-            <span class="orderbook-total">$${total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+            <span class="orderbook-total">$${Number.isFinite(total) ? total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'}</span>
         `;
         
         // Add click handler for price selection
@@ -1450,10 +1536,19 @@ function updateMarketDepthStats() {
 }
 
 function formatPrice(price, precision) {
-    return price.toLocaleString('en-US', {
-        minimumFractionDigits: precision,
-        maximumFractionDigits: precision
-    });
+    if (!Number.isFinite(price)) {
+        console.warn('formatPrice received invalid price:', price);
+        return '0.00';
+    }
+    try {
+        return price.toLocaleString('en-US', {
+            minimumFractionDigits: precision,
+            maximumFractionDigits: precision
+        });
+    } catch (error) {
+        console.error('Error in formatPrice:', error, { price, precision });
+        return '0.00';
+    }
 }
 
 function selectPrice(price) {
@@ -1667,7 +1762,24 @@ async function loadCandles(interval) {
         }
         
         const response = await fetch(`/api/candles/${interval}?market=${marketParam}&count=${count}`);
-        const candles = await response.json();
+        const responseData = await response.json();
+        
+        // Validate and extract candles data
+        let candles;
+        if (Array.isArray(responseData)) {
+            candles = responseData;
+        } else if (responseData.data && Array.isArray(responseData.data)) {
+            console.log('Found data array in response.data');
+            candles = responseData.data;
+        } else if (responseData.success === false) {
+            console.error('API returned error:', responseData.error || responseData.message);
+            throw new Error(`API Error: ${responseData.error || responseData.message || 'Unknown error'}`);
+        } else {
+            console.error('API returned non-array response:', responseData);
+            console.error('Response keys:', Object.keys(responseData));
+            console.error('Response type:', typeof responseData);
+            throw new Error('Invalid candles data format received from API');
+        }
         
         console.log(`Received ${candles.length} candles`);
         
@@ -2870,7 +2982,8 @@ function switchChartType(type) {
 function updateBuyTotal() {
     const amount = parseFloat(document.getElementById('buy-amount').value) || 0;
     const total = amount * currentPrice; // currentPrice is already in USDT
-    document.getElementById('buy-total').value = '$' + total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const formattedTotal = Number.isFinite(total) ? total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+    document.getElementById('buy-total').value = '$' + formattedTotal;
     
     // Update fee info display based on order type
     const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
@@ -2890,7 +3003,8 @@ function updateBuyTotal() {
 function updateSellTotal() {
     const amount = parseFloat(document.getElementById('sell-amount').value) || 0;
     const total = amount * currentPrice; // currentPrice is already in USDT
-    document.getElementById('sell-total').value = '$' + total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const formattedTotal = Number.isFinite(total) ? total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+    document.getElementById('sell-total').value = '$' + formattedTotal;
     
     // Update fee info display based on order type
     const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
@@ -2919,7 +3033,13 @@ function updatePositionSize() {
     const totalFees = openingFee + closingFee;
     
     // Update position size display
-    document.getElementById('position-size').value = '$' + positionSize.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    try {
+        const formattedPositionSize = Number.isFinite(positionSize) ? positionSize.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        document.getElementById('position-size').value = '$' + formattedPositionSize;
+    } catch (error) {
+        console.error('Error formatting position size:', error, { positionSize });
+        document.getElementById('position-size').value = '$0.00';
+    }
     
     // Update fee info display if it exists
     const feeInfoElement = document.getElementById('leverage-fee-info');
@@ -3102,7 +3222,9 @@ function openLeveragePosition() {
     const totalRequired = amount + openingFee;
     
     if (totalRequired > usdBalance) {
-        showToast(`Insufficient balance (Margin $${amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} + Fee $${openingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`, 'error');
+        const safeAmount = Number.isFinite(amount) ? amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeOpeningFee = Number.isFinite(openingFee) ? openingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        showToast(`Insufficient balance (Margin $${safeAmount} + Fee $${safeOpeningFee})`, 'error');
         return;
     }
     
@@ -3139,7 +3261,8 @@ function openLeveragePosition() {
         existingPosition.pnlPercent = (existingPosition.pnl / existingPosition.margin) * 100;
         
         const actionType = existingPosition.pnl >= 0 ? 'Pyramid' : 'Average Down';
-        showToast(`${actionType} complete! Average entry: $${weightedEntryPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, 'info');
+        const safeEntryPrice = Number.isFinite(weightedEntryPrice) ? weightedEntryPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        showToast(`${actionType} complete! Average entry: $${safeEntryPrice}`, 'info');
         
         // Play leverage sound for DCA
         playTradingSound('leverage');
@@ -3206,16 +3329,28 @@ function closeLeveragePosition(positionId, percentage = 100) {
     const totalFees = proportionalOpeningFee + closingFee;
     const finalPnl = rawPnl - totalFees;
     
-    // Validation log for debugging
-    console.log(`Partial close fee calculation:
-        - Total position size: $${position.size.toLocaleString()}
-        - Close ratio: ${percentage}%
-        - Original opening fee: $${position.openingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        - Proportional opening fee: $${proportionalOpeningFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        - Closing fee: $${closingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        - Total fees: $${totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        - Raw P&L: $${rawPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        - Final P&L: $${finalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`);
+    // Validation log for debugging with safe formatting
+    try {
+        const safeSize = Number.isFinite(position.size) ? position.size.toLocaleString() : '0';
+        const safeOpeningFee = Number.isFinite(position.openingFee) ? position.openingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeProportionalFee = Number.isFinite(proportionalOpeningFee) ? proportionalOpeningFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeClosingFee = Number.isFinite(closingFee) ? closingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeRawPnl = Number.isFinite(rawPnl) ? rawPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeFinalPnl = Number.isFinite(finalPnl) ? finalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        
+        console.log(`Partial close fee calculation:
+            - Total position size: $${safeSize}
+            - Close ratio: ${percentage}%
+            - Original opening fee: $${safeOpeningFee}
+            - Proportional opening fee: $${safeProportionalFee}
+            - Closing fee: $${safeClosingFee}
+            - Total fees: $${safeTotalFees}
+            - Raw P&L: $${safeRawPnl}
+            - Final P&L: $${safeFinalPnl}`);
+    } catch (error) {
+        console.log('Partial close fee calculation: Error formatting debug values');
+    };
     
     // Return proportional margin + final P&L
     const returnedMargin = position.margin * closeRatio;
@@ -3265,7 +3400,9 @@ function closeLeveragePosition(positionId, percentage = 100) {
     saveUserData();
     
     const statusText = percentage === 100 ? 'Full Close' : `${percentage}% Close`;
-    showToast(`Position ${statusText} - P&L: $${finalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (Fees: $${totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})})`, finalPnl >= 0 ? 'success' : 'error');
+    const safeFinalPnl = Number.isFinite(finalPnl) ? finalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+    const safeTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+    showToast(`Position ${statusText} - P&L: $${safeFinalPnl} (Fees: $${safeTotalFees})`, finalPnl >= 0 ? 'success' : 'error');
     
     // Play close position sound (profit = sell sound, loss = different sound)
     if (finalPnl >= 0) {
@@ -3273,6 +3410,56 @@ function closeLeveragePosition(positionId, percentage = 100) {
     } else {
         playTradingSound('loss'); // Loss - use special loss sound
     }
+}
+
+// Close all leverage positions
+function closeAllPositions() {
+    if (leveragePositions.length === 0) {
+        showToast('No positions to close', 'info');
+        return;
+    }
+    
+    // Show confirmation dialog
+    if (!confirm(`Are you sure you want to close all ${leveragePositions.length} position(s)? This action cannot be undone.`)) {
+        return;
+    }
+    
+    const positionCount = leveragePositions.length;
+    let totalPnl = 0;
+    let totalFees = 0;
+    
+    // Close all positions (we need to work backwards since we're removing from array)
+    for (let i = leveragePositions.length - 1; i >= 0; i--) {
+        const position = leveragePositions[i];
+        const positionId = position.id;
+        
+        // Calculate P&L before closing (same logic as closeLeveragePosition)
+        const positionMarket = position.market || currentMarket;
+        const positionPrice = marketPrices[positionMarket] || currentPrice;
+        const priceChange = positionPrice - position.entryPrice;
+        const pnlMultiplier = position.type === 'long' ? 1 : -1;
+        const rawPnl = (priceChange / position.entryPrice) * position.size * pnlMultiplier;
+        
+        // Calculate fees
+        const closingFee = position.size * getTradingFee('taker');
+        const positionTotalFees = position.openingFee + closingFee;
+        const finalPnl = rawPnl - positionTotalFees;
+        
+        totalPnl += finalPnl;
+        totalFees += positionTotalFees;
+        
+        // Close the position (100%)
+        closeLeveragePosition(positionId, 100);
+    }
+    
+    // Show summary toast
+    const safeTotalPnl = Number.isFinite(totalPnl) ? totalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+    const safeTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+    
+    showToast(
+        `Closed ${positionCount} position(s) - Total P&L: $${safeTotalPnl} (Fees: $${safeTotalFees})`, 
+        totalPnl >= 0 ? 'success' : 'error'
+    );
 }
 
 // Toggle close dropdown menu
@@ -3316,13 +3503,26 @@ function toggleCloseDropdown(positionId) {
 
 // Update leverage positions P&L and check for liquidations
 function updateLeveragePositions() {
+    // Safety check for leveragePositions array
+    if (!Array.isArray(leveragePositions)) {
+        console.warn('leveragePositions is not an array, initializing:', leveragePositions);
+        leveragePositions = [];
+        return;
+    }
+    
     // Create a copy to iterate safely (in case positions are removed during iteration)
     const positionsToCheck = [...leveragePositions];
     
     positionsToCheck.forEach((position, index) => {
+        // Safety check for position object
+        if (!position || typeof position !== 'object') {
+            console.warn('Invalid position object at index', index, position);
+            return;
+        }
+        
         // Get the correct price for this position's market
         const positionMarket = position.market || currentMarket; // Fallback for old positions
-        const positionPrice = marketPrices[positionMarket] || currentPrice; // Fallback to current price
+        const positionPrice = marketPrices[positionMarket] || currentPrice || 0; // Fallback to current price
         
         const priceChange = positionPrice - position.entryPrice;
         const pnlMultiplier = position.type === 'long' ? 1 : -1;
@@ -3463,14 +3663,24 @@ function updatePositionPnlDisplay(position, index) {
     if (positionItems[index]) {
         const pnlElement = positionItems[index].querySelector('.position-pnl');
         if (pnlElement) {
-            pnlElement.textContent = `$${position.pnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${position.pnlPercent.toFixed(2)}%)`;
-            pnlElement.className = `position-pnl ${position.pnl >= 0 ? 'positive' : 'negative'}`;
+            try {
+                const formattedPnl = Number.isFinite(position.pnl) ? position.pnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+                const formattedPercent = Number.isFinite(position.pnlPercent) ? position.pnlPercent.toFixed(2) : '0.00';
+                pnlElement.textContent = `$${formattedPnl} (${formattedPercent}%)`;
+                pnlElement.className = `position-pnl ${(position.pnl || 0) >= 0 ? 'positive' : 'negative'}`;
+            } catch (error) {
+                console.error('Error updating position PnL:', error, { position });
+                pnlElement.textContent = '$0.00 (0.00%)';
+                pnlElement.className = 'position-pnl';
+            }
         }
         
         // Update liquidation price display if element exists
         const liquidationElement = positionItems[index].querySelector('.liquidation-price');
         if (liquidationElement && position.liquidationPrice) {
-            liquidationElement.textContent = `Liq: $${position.liquidationPrice.toFixed(2)}`;
+            const formattedLiquidationPrice = Number.isFinite(position.liquidationPrice) ? 
+                position.liquidationPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : 'calculating...';
+            liquidationElement.textContent = `Liq: $${formattedLiquidationPrice}`;
         }
         
         // Update margin ratio display if element exists
@@ -3496,6 +3706,50 @@ function updateLeveragePositionsDisplay() {
         // Determine risk level for styling
         const riskClass = position.marginRatio < 0.02 ? 'danger' : position.marginRatio < 0.05 ? 'warning' : '';
         
+        // Format numbers safely
+        let formattedEntryPrice, formattedPnl, formattedMargin, formattedPnlPercent;
+        
+        try {
+            formattedEntryPrice = Number.isFinite(position.entryPrice) ? 
+                position.entryPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        } catch (error) {
+            console.error('Error formatting entry price:', error, { entryPrice: position.entryPrice });
+            formattedEntryPrice = '0.00';
+        }
+        
+        try {
+            formattedPnl = Number.isFinite(position.pnl) ? 
+                position.pnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        } catch (error) {
+            console.error('Error formatting PnL:', error, { pnl: position.pnl });
+            formattedPnl = '0.00';
+        }
+        
+        try {
+            formattedMargin = Number.isFinite(position.margin) ? 
+                position.margin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        } catch (error) {
+            console.error('Error formatting margin:', error, { margin: position.margin });
+            formattedMargin = '0.00';
+        }
+        
+        try {
+            formattedPnlPercent = Number.isFinite(position.pnlPercent) ? position.pnlPercent.toFixed(2) : '0.00';
+        } catch (error) {
+            console.error('Error formatting PnL percent:', error, { pnlPercent: position.pnlPercent });
+            formattedPnlPercent = '0.00';
+        }
+        
+        // Format liquidation price safely
+        let formattedLiqPrice;
+        try {
+            formattedLiqPrice = position.liquidationPrice && Number.isFinite(position.liquidationPrice) ? 
+                position.liquidationPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : 'calculating...';
+        } catch (error) {
+            console.error('Error formatting liquidation price:', error, { liquidationPrice: position.liquidationPrice });
+            formattedLiqPrice = 'calculating...';
+        }
+        
         return `
         <div class="position-item ${riskClass}">
             <div class="position-left">
@@ -3505,20 +3759,20 @@ function updateLeveragePositionsDisplay() {
                     <span class="position-market-label">${position.market || 'BTC/USDT'}</span>
                 </div>
                 <div class="position-prices">
-                    <span class="entry-price">Entry: $${position.entryPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                    <span class="liquidation-price">Liq: $${position.liquidationPrice ? position.liquidationPrice.toFixed(2) : 'calculating...'}</span>
+                    <span class="entry-price">Entry: $${formattedEntryPrice}</span>
+                    <span class="liquidation-price">Liq: $${formattedLiqPrice}</span>
                 </div>
             </div>
             
             <div class="position-center">
-                <div class="position-pnl ${position.pnl >= 0 ? 'positive' : 'negative'}">
-                    ${position.pnl >= 0 ? '+' : ''}$${position.pnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${position.pnlPercent.toFixed(2)}%)
+                <div class="position-pnl ${(position.pnl || 0) >= 0 ? 'positive' : 'negative'}">
+                    ${(position.pnl || 0) >= 0 ? '+' : ''}$${formattedPnl} (${formattedPnlPercent}%)
                 </div>
             </div>
             
             <div class="position-right">
                 <div class="margin-info">
-                    <div class="margin-amount">$${position.margin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                    <div class="margin-amount">$${formattedMargin}</div>
                     <div class="margin-ratio ${position.marginRatio < 0.02 ? 'danger' : position.marginRatio < 0.05 ? 'warning' : 'safe'}">
                         ${position.marginRatio ? (position.marginRatio * 100).toFixed(1) + '%' : '-%'}
                     </div>
@@ -3567,14 +3821,29 @@ function updateTransactionHistory() {
             const price = transaction.price || 0;
             const total = transaction.total || 0;
             
+            let formattedPrice, formattedTotal;
+            try {
+                formattedPrice = Number.isFinite(price) ? price.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+            } catch (error) {
+                console.error('Error formatting transaction price:', error, { price });
+                formattedPrice = '0.00';
+            }
+            
+            try {
+                formattedTotal = Number.isFinite(total) ? total.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+            } catch (error) {
+                console.error('Error formatting transaction total:', error, { total });
+                formattedTotal = '0.00';
+            }
+            
             content = `
                 <div class="transaction-info">
                     <span class="transaction-type ${typeClass}">${typeText}</span>
                     <span class="transaction-amount">${amount.toFixed(8)} BTC</span>
-                    <span class="transaction-price">@$${price.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    <span class="transaction-price">@$${formattedPrice}</span>
                 </div>
                 <div class="transaction-details">
-                    <span class="transaction-total">$${total.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                    <span class="transaction-total">$${formattedTotal}</span>
                     <span class="transaction-time">${time}</span>
                 </div>
             `;
@@ -3588,6 +3857,14 @@ function updateTransactionHistory() {
             const leverage = transaction.leverage || 1;
             const percentage = transaction.percentage || 100;
             
+            let formattedPnl;
+            try {
+                formattedPnl = Number.isFinite(pnl) ? pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+            } catch (error) {
+                console.error('Error formatting PnL:', error, { pnl });
+                formattedPnl = '0.00';
+            }
+            
             content = `
                 <div class="transaction-info">
                     <span class="transaction-type ${typeClass}">${typeText}</span>
@@ -3596,7 +3873,7 @@ function updateTransactionHistory() {
                 </div>
                 <div class="transaction-details">
                     <span class="transaction-total ${pnl >= 0 ? 'positive' : 'negative'}">
-                        ${pnl >= 0 ? '+' : ''}$${pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                        ${pnl >= 0 ? '+' : ''}$${formattedPnl}
                     </span>
                     <span class="transaction-time">${time}</span>
                 </div>
@@ -3612,6 +3889,14 @@ function updateTransactionHistory() {
             const liquidationPrice = transaction.liquidationPrice || 0;
             const loss = transaction.loss || 0;
             
+            let formattedLoss;
+            try {
+                formattedLoss = Number.isFinite(loss) ? loss.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+            } catch (error) {
+                console.error('Error formatting loss:', error, { loss });
+                formattedLoss = '0.00';
+            }
+            
             content = `
                 <div class="transaction-info">
                     <span class="transaction-type liquidation">${typeText}</span>
@@ -3620,8 +3905,8 @@ function updateTransactionHistory() {
                 </div>
                 <div class="transaction-details">
                     <span class="liquidation-details">
-                        <span class="liquidation-price">Liq: $${liquidationPrice.toFixed(2)}</span>
-                        <span class="transaction-total negative">$${loss.toLocaleString('en-US', {minimumFractionDigits: 2})}</span>
+                        <span class="liquidation-price">Liq: $${Number.isFinite(liquidationPrice) ? liquidationPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : 'N/A'}</span>
+                        <span class="transaction-total negative">$${formattedLoss}</span>
                     </span>
                     <span class="transaction-time">${time}</span>
                 </div>
@@ -3725,13 +4010,26 @@ function calculateSpotProfitLoss() {
 
 // Update UI elements
 function updateUI() {
-    // Calculate total assets using marketPrices
-    const btcValue = btcBalance * (marketPrices['BTC/USDT'] || 0);
-    const ethValue = ethBalance * (marketPrices['ETH/USDT'] || 0);
-    const totalAssets = usdBalance + btcValue + ethValue;
+    // Ensure balances are properly initialized with default values and are numbers
+    const safeUsdBalance = ensureNumeric(usdBalance, 0);
+    const safeBtcBalance = ensureNumeric(btcBalance, 0);
+    const safeEthBalance = ensureNumeric(ethBalance, 0);
     
-    // Calculate unrealized P&L from leverage positions
-    const unrealizedPnL = leveragePositions.reduce((sum, position) => sum + position.pnl, 0);
+    // Debug logging for troubleshooting
+    if (usdBalance !== safeUsdBalance || btcBalance !== safeBtcBalance || ethBalance !== safeEthBalance) {
+        console.warn('Balance conversion applied:', { 
+            original: { usdBalance, btcBalance, ethBalance },
+            safe: { safeUsdBalance, safeBtcBalance, safeEthBalance }
+        });
+    }
+    
+    // Calculate total assets using marketPrices
+    const btcValue = safeBtcBalance * (marketPrices['BTC/USDT'] || 0);
+    const ethValue = safeEthBalance * (marketPrices['ETH/USDT'] || 0);
+    const totalAssets = safeUsdBalance + btcValue + ethValue;
+    
+    // Calculate unrealized P&L from leverage positions (safely handle undefined array)
+    const unrealizedPnL = (leveragePositions || []).reduce((sum, position) => sum + (position.pnl || 0), 0);
     
     // Calculate spot profits
     const spotProfits = calculateSpotProfitLoss();
@@ -3739,14 +4037,20 @@ function updateUI() {
     // Update balance displays in USD (safely check if elements exist)
     const krwBalanceEl = document.getElementById('krw-balance');
     if (krwBalanceEl) {
-        krwBalanceEl.textContent = '$' + usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        try {
+            const displayBalance = Number.isFinite(safeUsdBalance) ? safeUsdBalance : 0;
+            krwBalanceEl.textContent = '$' + displayBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        } catch (error) {
+            console.error('Error formatting USD balance:', error, { safeUsdBalance, usdBalance });
+            krwBalanceEl.textContent = '$0.00'; // Fallback
+        }
     }
     
     const btcBalanceEl = document.getElementById('btc-balance');
     if (btcBalanceEl) {
         // Get current crypto symbol and corresponding balance
-        const currentCrypto = currentMarket.split(/[-\/]/)[0]; // BTC or ETH
-        const currentBalance = currentCrypto === 'ETH' ? ethBalance : btcBalance;
+        const currentCrypto = (currentMarket || 'BTC-USDT').split(/[-\/]/)[0]; // BTC or ETH
+        const currentBalance = currentCrypto === 'ETH' ? safeEthBalance : safeBtcBalance;
         const currentProfit = spotProfits[currentCrypto] || { profitPercent: 0, averageBuyPrice: 0 };
         
         const profitText = currentProfit.profitPercent !== 0 ? 
@@ -3776,19 +4080,33 @@ function updateUI() {
         };
         currentCryptoTitleEl.textContent = cryptoNames[currentCrypto] || `${currentCrypto} Spot`;
         
-        // Update combined profit display: $amount (percentage%)
-        const dollarSign = currentProfit.profit >= 0 ? '+' : '';
-        const percentSign = currentProfit.profitPercent >= 0 ? '+' : '';
-        const profitCombinedText = `${dollarSign}$${currentProfit.profit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${percentSign}${currentProfit.profitPercent.toFixed(2)}%)`;
+        // Update combined profit display: $amount (percentage%) with safety checks
+        const dollarSign = (currentProfit.profit || 0) >= 0 ? '+' : '';
+        const percentSign = (currentProfit.profitPercent || 0) >= 0 ? '+' : '';
+        
+        let profitCombinedText;
+        try {
+            const safeProfit = Number.isFinite(currentProfit.profit) ? currentProfit.profit : 0;
+            const safeProfitPercent = Number.isFinite(currentProfit.profitPercent) ? currentProfit.profitPercent : 0;
+            profitCombinedText = `${dollarSign}$${safeProfit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${percentSign}${safeProfitPercent.toFixed(2)}%)`;
+        } catch (error) {
+            console.error('Error formatting profit display:', error, { currentProfit });
+            profitCombinedText = '+$0.00 (+0.00%)';
+        }
         
         currentProfitCombinedEl.textContent = profitCombinedText;
         currentProfitCombinedEl.className = 'profit-combined ' + 
-            (currentProfit.profitPercent > 0 ? 'positive' : currentProfit.profitPercent < 0 ? 'negative' : '');
+            ((currentProfit.profitPercent || 0) > 0 ? 'positive' : (currentProfit.profitPercent || 0) < 0 ? 'negative' : '');
         
-        // Update average buy price
-        currentAvgPriceEl.textContent = currentProfit.averageBuyPrice > 0 ? 
-            '$' + currentProfit.averageBuyPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : 
-            '$0.00';
+        // Update average buy price with safety check
+        try {
+            currentAvgPriceEl.textContent = (currentProfit.averageBuyPrice || 0) > 0 ? 
+                '$' + currentProfit.averageBuyPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : 
+                '$0.00';
+        } catch (error) {
+            console.error('Error formatting average buy price:', error, { averageBuyPrice: currentProfit.averageBuyPrice });
+            currentAvgPriceEl.textContent = '$0.00';
+        }
     }
     
     // Update price display in trading forms
@@ -3801,15 +4119,25 @@ function updateUI() {
         sellPriceEl.value = currentPrice.toFixed(2);
     }
     
-    // Update available balances in trading forms
+    // Update available balances in trading forms using safe values
     const availableBalanceEl = document.querySelector('.available-balance');
     if (availableBalanceEl) {
-        availableBalanceEl.textContent = '$' + usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        try {
+            availableBalanceEl.textContent = '$' + safeUsdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        } catch (error) {
+            console.error('Error updating available balance:', error, { safeUsdBalance, usdBalance });
+            availableBalanceEl.textContent = '$0.00';
+        }
     }
     
     const availableBtcEl = document.querySelector('.available-btc');
     if (availableBtcEl) {
-        availableBtcEl.textContent = btcBalance.toFixed(8) + ' BTC';
+        try {
+            availableBtcEl.textContent = safeBtcBalance.toFixed(8) + ' BTC';
+        } catch (error) {
+            console.error('Error updating available BTC balance:', error, { safeBtcBalance, btcBalance });
+            availableBtcEl.textContent = '0.00000000 BTC';
+        }
     }
     
     // Update current price display in trading form
@@ -3822,7 +4150,8 @@ function updateUI() {
     if (btcBalance > 0) {
         const avgPrice = calculateAveragePrice();
         if (avgPriceEl) {
-            avgPriceEl.textContent = '$' + avgPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const formattedAvgPrice = Number.isFinite(avgPrice) ? avgPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+            avgPriceEl.textContent = '$' + formattedAvgPrice;
         }
         
         // Calculate profit rate
@@ -3978,7 +4307,8 @@ function updatePriceInputs(orderType) {
 function updateCurrentPriceDisplay() {
     const priceElement = document.getElementById('current-btc-price');
     if (priceElement && currentPrice) {
-        priceElement.textContent = '$' + currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const formattedPrice = Number.isFinite(currentPrice) ? currentPrice.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        priceElement.textContent = '$' + formattedPrice;
     }
 }
 

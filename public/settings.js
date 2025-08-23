@@ -1,3 +1,4 @@
+// Version: 1.0.2 - Fixed BTC balance profit calculation consistency
 // Settings Page JavaScript
 let currentUser = null;
 let isLoggedIn = false;
@@ -116,12 +117,23 @@ async function loadUserData() {
         });
         
         if (response.ok) {
-            const userData = await response.json();
-            usdBalance = userData.usdBalance;
-            btcBalance = userData.btcBalance;
+            const apiResponse = await response.json();
+            console.log('Settings: Raw API response:', apiResponse);
+            
+            // Handle both old and new API response formats
+            const userData = apiResponse.data || apiResponse;
+            console.log('Settings: Processed user data:', userData);
+            
+            usdBalance = Number.isFinite(userData.usdBalance) ? userData.usdBalance : 10000;
+            btcBalance = Number.isFinite(userData.btcBalance) ? userData.btcBalance : 0;
             transactions = userData.transactions || [];
             leveragePositions = userData.leveragePositions || [];
             userTimezone = userData.timezone || 'UTC';
+            
+            console.log('Settings: Final values after loading:', {
+                usdBalance, btcBalance, transactionsCount: transactions.length, 
+                leveragePositionsCount: leveragePositions.length, userTimezone
+            });
             
             console.log('Loaded user timezone from server:', userData.timezone);
             console.log('Set userTimezone to:', userTimezone);
@@ -198,6 +210,8 @@ async function saveUserData() {
 
 // Update UI with current data
 function updateUI() {
+    console.log('Settings updateUI: Starting with values:', { usdBalance, btcBalance, isLoggedIn });
+    
     const currentPrice = getCurrentPrice();
     const portfolioValue = usdBalance + (btcBalance * currentPrice);
     const btcValue = btcBalance * currentPrice;
@@ -206,30 +220,39 @@ function updateUI() {
     // Update navigation balance displays
     const usdBalanceElement = document.getElementById('krw-balance');
     if (usdBalanceElement) {
-        usdBalanceElement.textContent = 
-            `$${usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        let formattedUsdBalance;
+        try {
+            formattedUsdBalance = Number.isFinite(usdBalance) ? 
+                usdBalance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        } catch (error) {
+            console.error('Error formatting USD balance in settings:', error, { usdBalance });
+            formattedUsdBalance = '0.00';
+        }
+        usdBalanceElement.textContent = `$${formattedUsdBalance}`;
     }
     
     // Update BTC balance with percentage in navigation
     const btcBalanceElement = document.getElementById('btc-balance');
     if (btcBalanceElement) {
-        // Calculate profit/loss percentage based on initial value
-        const initialValue = 10000; // Initial USD balance
-        const currentTotalValue = portfolioValue;
-        const profitLossAmount = currentTotalValue - initialValue;
-        const profitLossPercentage = (profitLossAmount / initialValue) * 100;
-        const isProfit = profitLossAmount >= 0;
-        const percentageColor = isProfit ? 'var(--accent-green)' : 'var(--accent-red)';
-        const sign = isProfit ? '+' : '';
-        
-        btcBalanceElement.innerHTML = `${btcBalance.toFixed(8)} <span class="${isProfit ? 'profit-text' : 'loss-text'}" data-percentage>(${sign}${profitLossPercentage.toFixed(1)}%)</span>`;
+        // Calculate BTC profit using same logic as main trading page
+        const btcProfit = calculateSpotProfitLoss()['BTC'] || { profitPercent: 0 };
+        const btcProfitText = btcProfit.profitPercent !== 0 ? 
+            ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
+        btcBalanceElement.innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
     }
     
     // Update settings page elements if they exist
     const portfolioValueElement = document.getElementById('portfolio-value');
     if (portfolioValueElement) {
-        portfolioValueElement.textContent = 
-            `$${portfolioValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        let formattedPortfolioValue;
+        try {
+            formattedPortfolioValue = Number.isFinite(portfolioValue) ? 
+                portfolioValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        } catch (error) {
+            console.error('Error formatting portfolio value in settings:', error, { portfolioValue });
+            formattedPortfolioValue = '0.00';
+        }
+        portfolioValueElement.textContent = `$${formattedPortfolioValue}`;
     }
     
     const totalTradesElement = document.getElementById('total-trades');
@@ -241,6 +264,73 @@ function updateUI() {
 // Get current price (placeholder - in real app this would come from WebSocket)
 function getCurrentPrice() {
     return 50000; // Placeholder price
+}
+
+// Calculate spot profit/loss for each cryptocurrency (same logic as main trading page)
+function calculateSpotProfitLoss() {
+    const spotProfits = {};
+    
+    // Process each market (assuming BTC for now)
+    ['BTC-USDT'].forEach(market => {
+        const [crypto] = market.split('-');
+        const currentBalance = btcBalance;
+        
+        if (currentBalance <= 0) {
+            spotProfits[crypto] = {
+                totalInvested: 0,
+                currentValue: 0,
+                profit: 0,
+                profitPercent: 0,
+                averageBuyPrice: 0
+            };
+            return;
+        }
+        
+        // Calculate average buy price from transactions (time-ordered)
+        const relevantTransactions = transactions.filter(tx => 
+            (tx.market === market || tx.market === `${crypto}/USDT` || tx.type === 'buy' || tx.type === 'sell') &&
+            (tx.type === 'buy' || tx.type === 'sell')
+        ).sort((a, b) => new Date(a.time) - new Date(b.time));
+        
+        let runningBalance = 0;
+        let averageBuyPrice = 0;
+        
+        // Process transactions in chronological order
+        relevantTransactions.forEach((tx) => {
+            if (tx.type === 'buy') {
+                // Calculate new weighted average buy price
+                const newBalance = runningBalance + (tx.amount || 0);
+                if (newBalance > 0) {
+                    averageBuyPrice = ((averageBuyPrice * runningBalance) + ((tx.price || 0) * (tx.amount || 0))) / newBalance;
+                }
+                runningBalance = newBalance;
+            } else if (tx.type === 'sell') {
+                // Sell reduces balance but keeps average buy price unchanged
+                runningBalance -= (tx.amount || 0);
+                if (runningBalance <= 0) {
+                    runningBalance = 0;
+                    averageBuyPrice = 0;
+                }
+            }
+        });
+        
+        // Use current price
+        const currentMarketPrice = getCurrentPrice();
+        const currentValue = currentBalance * currentMarketPrice;
+        const totalInvested = currentBalance * averageBuyPrice;
+        const profit = currentValue - totalInvested;
+        const profitPercent = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
+        
+        spotProfits[crypto] = {
+            totalInvested,
+            currentValue,
+            profit,
+            profitPercent,
+            averageBuyPrice
+        };
+    });
+    
+    return spotProfits;
 }
 
 // Setup settings page functionality
@@ -320,27 +410,6 @@ function setupSettingsPage() {
         }
     });
 
-    function updateCurrentTimeDisplay() {
-        const selectedTimezone = timezoneSelect.value;
-        const now = new Date();
-        const options = {
-            timeZone: selectedTimezone,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        };
-        
-        try {
-            const formattedTime = now.toLocaleString('en-US', options);
-            currentTimeDisplay.textContent = `${formattedTime} (${selectedTimezone})`;
-        } catch (error) {
-            currentTimeDisplay.textContent = `${now.toISOString()} (UTC)`;
-        }
-    }
 
     // Update time display every second
     setInterval(updateCurrentTimeDisplay, 1000);
@@ -587,4 +656,35 @@ function setupTradingSoundsToggle() {
             3000
         );
     });
+}
+
+// Update current time display (global function)
+function updateCurrentTimeDisplay() {
+    const timezoneSelect = document.getElementById('timezone-select');
+    const currentTimeDisplay = document.getElementById('current-time-display');
+    
+    if (!timezoneSelect || !currentTimeDisplay) {
+        return; // Elements not available yet
+    }
+    
+    const selectedTimezone = timezoneSelect.value || userTimezone;
+    const now = new Date();
+    const options = {
+        timeZone: selectedTimezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    };
+    
+    try {
+        const formattedTime = now.toLocaleString('en-US', options);
+        currentTimeDisplay.textContent = `${formattedTime} (${selectedTimezone})`;
+    } catch (error) {
+        console.error('Error formatting time:', error);
+        currentTimeDisplay.textContent = `${now.toISOString()} (UTC)`;
+    }
 }

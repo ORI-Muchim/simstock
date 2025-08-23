@@ -310,6 +310,96 @@ const options = {
             }
           }
         },
+        StandardAPIResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              description: 'Operation success status'
+            },
+            data: {
+              type: 'object',
+              description: 'Response data'
+            },
+            message: {
+              type: 'string',
+              description: 'Success message'
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Response timestamp'
+            }
+          },
+          required: ['success', 'timestamp']
+        },
+        StandardAPIError: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              example: false,
+              description: 'Operation success status (always false for errors)'
+            },
+            error: {
+              type: 'string',
+              description: 'Error message'
+            },
+            errors: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  field: { type: 'string' },
+                  message: { type: 'string' }
+                }
+              },
+              description: 'Detailed validation errors'
+            },
+            statusCode: {
+              type: 'integer',
+              description: 'HTTP status code'
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Error timestamp'
+            }
+          },
+          required: ['success', 'error', 'timestamp']
+        },
+        ChartSettings: {
+          type: 'object',
+          properties: {
+            indicators: {
+              type: 'object',
+              additionalProperties: {
+                type: 'boolean'
+              },
+              description: 'Enabled indicators (ma, rsi, bollinger, etc.)'
+            },
+            indicatorSettings: {
+              type: 'object',
+              additionalProperties: {
+                type: 'object'
+              },
+              description: 'Settings for each indicator'
+            },
+            drawings: {
+              type: 'array',
+              items: {
+                type: 'object'
+              },
+              description: 'Chart drawings (trendlines, fibonacci, etc.)'
+            },
+            chartType: {
+              type: 'string',
+              enum: ['candlestick', 'line', 'area'],
+              default: 'candlestick',
+              description: 'Chart display type'
+            }
+          }
+        },
         MonitoringStatus: {
           type: 'object',
           properties: {
@@ -359,6 +449,62 @@ const options = {
                   description: 'Average response time in ms'
                 }
               }
+            }
+          }
+        }
+      }
+    },
+    responses: {
+      UnauthorizedError: {
+        description: 'Authentication required',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/StandardAPIError'
+            },
+            example: {
+              success: false,
+              error: 'Authentication required',
+              statusCode: 401,
+              timestamp: '2025-08-23T10:25:31.868Z'
+            }
+          }
+        }
+      },
+      ForbiddenError: {
+        description: 'Invalid token',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/StandardAPIError'
+            },
+            example: {
+              success: false,
+              error: 'Invalid token',
+              statusCode: 403,
+              timestamp: '2025-08-23T10:25:31.868Z'
+            }
+          }
+        }
+      },
+      ValidationError: {
+        description: 'Validation failed',
+        content: {
+          'application/json': {
+            schema: {
+              $ref: '#/components/schemas/StandardAPIError'
+            },
+            example: {
+              success: false,
+              error: 'Validation failed',
+              errors: [
+                {
+                  field: 'username',
+                  message: 'Username must be at least 3 characters'
+                }
+              ],
+              statusCode: 400,
+              timestamp: '2025-08-23T10:25:31.868Z'
             }
           }
         }

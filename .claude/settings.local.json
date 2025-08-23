@@ -31,7 +31,13 @@
       "Bash(start http://localhost:3000/settings.html)",
       "Bash(dir \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")",
       "Bash(del \"C:\\Users\\whals\\Desktop\\simstock\\UserswhalsDesktopsimstockmarket_data.db\")",
-      "Bash(start http://localhost:3000/login.html)"
+      "Bash(start http://localhost:3000/login.html)",
+      "Bash(npm test:*)",
+      "Bash(grep:*)",
+      "Bash(PORT=3001 npm start)",
+      "Bash(start http://localhost:3001)",
+      "Bash(start http://localhost:3000/monitoring.html)",
+      "Bash(move:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

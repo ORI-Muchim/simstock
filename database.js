@@ -5,6 +5,9 @@ const path = require('path');
 // Create database connection
 const db = new sqlite3.Database(path.join(__dirname, 'trading.db'));
 
+// Enable foreign key constraints
+db.run('PRAGMA foreign_keys = ON');
+
 // Initialize database tables
 db.serialize(() => {
     // Users table
@@ -21,14 +24,14 @@ db.serialize(() => {
     db.run(`
         CREATE TABLE IF NOT EXISTS user_data (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            usd_balance REAL DEFAULT 10000,
-            btc_balance REAL DEFAULT 0,
+            user_id INTEGER NOT NULL UNIQUE,
+            usd_balance REAL DEFAULT 10000 CHECK (usd_balance >= 0),
+            btc_balance REAL DEFAULT 0 CHECK (btc_balance >= 0),
             transactions TEXT DEFAULT '[]',
             leverage_positions TEXT DEFAULT '[]',
             timezone TEXT DEFAULT 'UTC',
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     `);
     
@@ -50,7 +53,7 @@ db.serialize(() => {
             drawings TEXT DEFAULT '[]',
             chart_type TEXT DEFAULT 'candlestick',
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
             UNIQUE(user_id, market)
         )
     `);
@@ -62,24 +65,39 @@ const createUser = (username, password) => {
         bcrypt.hash(password, 10, (err, hash) => {
             if (err) return reject(err);
             
-            db.run(
-                'INSERT INTO users (username, password) VALUES (?, ?)',
-                [username, hash],
-                function(err) {
-                    if (err) return reject(err);
-                    
-                    const userId = this.lastID;
-                    // Create initial user data
-                    db.run(
-                        'INSERT INTO user_data (user_id) VALUES (?)',
-                        [userId],
-                        (err) => {
-                            if (err) return reject(err);
-                            resolve(userId);
+            // Use transaction for atomic user creation
+            db.serialize(() => {
+                db.run('BEGIN TRANSACTION');
+                
+                db.run(
+                    'INSERT INTO users (username, password) VALUES (?, ?)',
+                    [username, hash],
+                    function(err) {
+                        if (err) {
+                            db.run('ROLLBACK');
+                            return reject(err);
                         }
-                    );
-                }
-            );
+                        
+                        const userId = this.lastID;
+                        // Create initial user data
+                        db.run(
+                            'INSERT INTO user_data (user_id) VALUES (?)',
+                            [userId],
+                            (err) => {
+                                if (err) {
+                                    db.run('ROLLBACK');
+                                    return reject(err);
+                                }
+                                
+                                db.run('COMMIT', (err) => {
+                                    if (err) return reject(err);
+                                    resolve(userId);
+                                });
+                            }
+                        );
+                    }
+                );
+            });
         });
     });
 };
@@ -194,6 +212,48 @@ const deleteChartSettings = (userId, market) => {
     });
 };
 
+// Batch operations to prevent N+1 queries
+const getUsersByIds = (userIds) => {
+    return new Promise((resolve, reject) => {
+        if (!userIds.length) return resolve([]);
+        
+        const placeholders = userIds.map(() => '?').join(',');
+        const sql = `SELECT * FROM users WHERE id IN (${placeholders})`;
+        
+        db.all(sql, userIds, (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows);
+        });
+    });
+};
+
+const getUserDataByIds = (userIds) => {
+    return new Promise((resolve, reject) => {
+        if (!userIds.length) return resolve([]);
+        
+        const placeholders = userIds.map(() => '?').join(',');
+        const sql = `
+            SELECT ud.*, u.created_at as member_since, u.username 
+            FROM user_data ud 
+            JOIN users u ON ud.user_id = u.id 
+            WHERE ud.user_id IN (${placeholders})
+        `;
+        
+        db.all(sql, userIds, (err, rows) => {
+            if (err) return reject(err);
+            
+            // Parse JSON fields
+            const processedRows = rows.map(row => ({
+                ...row,
+                transactions: JSON.parse(row.transactions),
+                leverage_positions: JSON.parse(row.leverage_positions)
+            }));
+            
+            resolve(processedRows);
+        });
+    });
+};
+
 module.exports = {
     db,
     createUser,
@@ -202,5 +262,8 @@ module.exports = {
     updateUserData,
     saveChartSettings,
     getChartSettings,
-    deleteChartSettings
+    deleteChartSettings,
+    // Batch operations
+    getUsersByIds,
+    getUserDataByIds
 };

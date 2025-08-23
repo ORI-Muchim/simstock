@@ -18,6 +18,7 @@ class MonitoringDashboard {
         this.maxDataPoints = 50;
         this.autoRefresh = true;
         this.refreshInterval = null;
+        this.currentRefreshRate = 5000;
         
         this.init();
     }
@@ -488,6 +489,27 @@ class MonitoringDashboard {
                 }
             });
         }
+
+        // Refresh interval selector
+        const refreshSelect = document.getElementById('refresh-interval');
+        if (refreshSelect) {
+            refreshSelect.addEventListener('change', (e) => {
+                this.currentRefreshRate = parseInt(e.target.value);
+                if (this.autoRefresh) {
+                    this.stopAutoRefresh();
+                    this.startAutoRefresh();
+                }
+            });
+        }
+
+        // Global functions for HTML onclick handlers
+        window.exportMetrics = () => this.exportMetrics();
+        window.dismissAllAlerts = () => this.dismissAllAlerts();
+        window.refreshData = () => {
+            this.requestMetricsUpdate();
+            this.loadSystemStats();
+            this.loadAlerts();
+        };
     }
 
     startAutoRefresh() {
@@ -499,7 +521,7 @@ class MonitoringDashboard {
             if (this.autoRefresh) {
                 this.requestMetricsUpdate();
             }
-        }, 5000); // Update every 5 seconds
+        }, this.currentRefreshRate || 5000);
     }
 
     stopAutoRefresh() {
@@ -507,6 +529,150 @@ class MonitoringDashboard {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
         }
+    }
+
+    // New methods for enhanced dashboard functionality
+    async exportMetrics() {
+        try {
+            console.log('Exporting metrics...');
+            
+            // Get all metric types
+            const metricTypes = ['system', 'application', 'websocket', 'database', 'api'];
+            const exports = {};
+            
+            for (const type of metricTypes) {
+                try {
+                    const response = await fetch(`/api/monitoring/export/${type}?format=json`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        exports[type] = data.data;
+                    }
+                } catch (error) {
+                    console.warn(`Failed to export ${type} metrics:`, error);
+                }
+            }
+            
+            // Create and download file
+            const blob = new Blob([JSON.stringify(exports, null, 2)], { 
+                type: 'application/json' 
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `monitoring-metrics-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            this.showNotification('Metrics exported successfully', 'success');
+        } catch (error) {
+            console.error('Failed to export metrics:', error);
+            this.showNotification('Failed to export metrics', 'error');
+        }
+    }
+
+    async dismissAllAlerts() {
+        try {
+            const response = await fetch('/api/monitoring/alerts/dismiss-all', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                this.alerts = [];
+                this.renderAlerts();
+                this.showNotification('All alerts dismissed', 'success');
+            }
+        } catch (error) {
+            console.error('Failed to dismiss alerts:', error);
+            this.showNotification('Failed to dismiss alerts', 'error');
+        }
+    }
+
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            background: ${type === 'success' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--accent-color)'};
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        `;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    }
+
+    renderAlerts() {
+        const alertSummary = document.getElementById('alert-summary');
+        const alertList = document.getElementById('alert-list');
+        
+        if (!alertSummary || !alertList) return;
+        
+        if (this.alerts.length === 0) {
+            alertSummary.style.display = 'none';
+            return;
+        }
+        
+        alertSummary.style.display = 'block';
+        
+        const alertsHTML = this.alerts.map((alert, index) => `
+            <div class="alert-item">
+                <div class="alert-content">
+                    <div class="alert-message">${alert.message}</div>
+                    <div class="alert-time">${new Date(alert.timestamp).toLocaleString()}</div>
+                </div>
+                <button class="dismiss-btn" onclick="dashboard.dismissAlert(${index})">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `).join('');
+        
+        alertList.innerHTML = alertsHTML;
+    }
+
+    dismissAlert(index) {
+        if (index >= 0 && index < this.alerts.length) {
+            this.alerts.splice(index, 1);
+            this.renderAlerts();
+        }
+    }
+
+    // Enhanced metric updates with trend analysis
+    updateMetricsWithTrends(newMetrics) {
+        const timestamp = Date.now();
+        
+        // Add trend indicators
+        Object.keys(newMetrics).forEach(key => {
+            if (this.metrics[key] && this.metrics[key].length > 0) {
+                const lastValue = this.metrics[key][this.metrics[key].length - 1].value;
+                const currentValue = newMetrics[key];
+                const trend = currentValue > lastValue ? 'up' : currentValue < lastValue ? 'down' : 'stable';
+                
+                newMetrics[key] = {
+                    value: currentValue,
+                    trend: trend,
+                    change: currentValue - lastValue
+                };
+            } else {
+                newMetrics[key] = {
+                    value: newMetrics[key],
+                    trend: 'stable',
+                    change: 0
+                };
+            }
+        });
+        
+        this.updateMetrics(newMetrics);
     }
 }
 
