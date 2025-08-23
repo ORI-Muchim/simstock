@@ -3594,3 +3594,122 @@ select option:focus {
         grid-template-columns: 1fr;
     }
 }
+
+/* Pending Orders Styles */
+#pending-orders-section {
+    margin-bottom: 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#pending-orders-section .section-header {
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+#pending-orders-section .section-header h4 {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+}
+
+#pending-orders-list {
+    padding: 0;
+}
+
+.pending-order-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    transition: background-color 0.2s ease;
+}
+
+.pending-order-item:last-child {
+    border-bottom: none;
+}
+
+.pending-order-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.pending-order-item.buy {
+    border-left: 3px solid var(--accent-green);
+}
+
+.pending-order-item.sell {
+    border-left: 3px solid var(--accent-red);
+}
+
+.order-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.order-type {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.pending-order-item.buy .order-type {
+    color: var(--accent-green);
+}
+
+.pending-order-item.sell .order-type {
+    color: var(--accent-red);
+}
+
+.order-details {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.order-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.cancel-order-btn {
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--accent-red);
+    color: var(--accent-red);
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cancel-order-btn:hover {
+    background: var(--accent-red);
+    color: white;
+}
+
+/* Empty state for pending orders */
+.empty-pending-orders {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* Responsive adjustments for pending orders */
+@media (max-width: 768px) {
+    .pending-order-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .order-actions {
+        align-self: flex-end;
+    }
+}

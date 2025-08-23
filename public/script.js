@@ -1,4 +1,4 @@
-// Version: 1.0.4 - Fixed Close All button functionality
+// Version: 1.0.7 - Fixed duplicate orderType variable declaration
 // Last Updated: 2025-08-23 20:03:00
 // Global variables
 let ws = null;
@@ -23,6 +23,7 @@ let marketPrices = {
 };
 let transactions = [];
 let leveragePositions = [];
+let pendingOrders = []; // Array to store limit orders
 let userTimezone = 'UTC'; // Default timezone
 let chart = null;
 let candleSeries = null;
@@ -703,11 +704,13 @@ async function loadUserData() {
             ethBalance = ensureNumeric(userData.ethBalance, 0); // Also set ethBalance
             transactions = Array.isArray(userData.transactions) ? userData.transactions : [];
             leveragePositions = Array.isArray(userData.leveragePositions) ? userData.leveragePositions : [];
+            pendingOrders = Array.isArray(userData.pendingOrders) ? userData.pendingOrders : [];
             userTimezone = userData.timezone || 'UTC';
             
             console.log('User data loaded successfully:', { 
                 usdBalance, btcBalance, ethBalance, 
-                transactionCount: transactions.length, 
+                transactionCount: transactions.length,
+                pendingOrdersCount: pendingOrders.length, 
                 positionCount: leveragePositions.length 
             });
             
@@ -752,6 +755,7 @@ async function saveUserData() {
                 btcBalance,
                 transactions,
                 leveragePositions,
+                pendingOrders,
                 timezone: userTimezone
             })
         });
@@ -1065,9 +1069,11 @@ function setupEventListeners() {
         });
     });
     
-    // Buy/Sell amount inputs
+    // Buy/Sell amount and price inputs
     document.getElementById('buy-amount').addEventListener('input', updateBuyTotal);
     document.getElementById('sell-amount').addEventListener('input', updateSellTotal);
+    document.getElementById('buy-price').addEventListener('input', updateBuyTotal);
+    document.getElementById('sell-price').addEventListener('input', updateSellTotal);
     document.getElementById('leverage-amount').addEventListener('input', updatePositionSize);
     document.getElementById('leverage-select').addEventListener('change', updatePositionSize);
     
@@ -1341,6 +1347,9 @@ function updatePrice(data) {
     
     // Update total assets
     updateUI();
+    
+    // Check pending orders for execution
+    checkPendingOrders();
 }
 
 // Professional Orderbook System
@@ -2981,12 +2990,23 @@ function switchChartType(type) {
 // Calculate buy total
 function updateBuyTotal() {
     const amount = parseFloat(document.getElementById('buy-amount').value) || 0;
-    const total = amount * currentPrice; // currentPrice is already in USDT
+    
+    // Check order type and use appropriate price
+    const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
+    let price = currentPrice;
+    
+    if (orderType === 'limit') {
+        const limitPrice = parseFloat(document.getElementById('buy-price').value);
+        if (limitPrice && limitPrice > 0) {
+            price = limitPrice;
+        }
+    }
+    
+    const total = amount * price;
     const formattedTotal = Number.isFinite(total) ? total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
     document.getElementById('buy-total').value = '$' + formattedTotal;
     
-    // Update fee info display based on order type
-    const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
+    // Update fee info display based on order type (reuse orderType variable)
     const feeRate = orderType === 'limit' ? getTradingFee('maker') : getTradingFee('taker');
     const feeType = orderType === 'limit' ? 'Maker' : 'Taker';
     
@@ -3002,12 +3022,23 @@ function updateBuyTotal() {
 // Calculate sell total
 function updateSellTotal() {
     const amount = parseFloat(document.getElementById('sell-amount').value) || 0;
-    const total = amount * currentPrice; // currentPrice is already in USDT
+    
+    // Check order type and use appropriate price
+    const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
+    let price = currentPrice;
+    
+    if (orderType === 'limit') {
+        const limitPrice = parseFloat(document.getElementById('sell-price').value);
+        if (limitPrice && limitPrice > 0) {
+            price = limitPrice;
+        }
+    }
+    
+    const total = amount * price;
     const formattedTotal = Number.isFinite(total) ? total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
     document.getElementById('sell-total').value = '$' + formattedTotal;
     
-    // Update fee info display based on order type
-    const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
+    // Update fee info display based on order type (reuse orderType variable)
     const feeRate = orderType === 'limit' ? getTradingFee('maker') : getTradingFee('taker');
     const feeType = orderType === 'limit' ? 'Maker' : 'Taker';
     
@@ -3057,19 +3088,72 @@ function executeBuy() {
         return;
     }
     
+    // Check order type (market or limit)
+    const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
+    const [crypto] = currentMarket.split('/');
+    
+    if (orderType === 'limit') {
+        // Handle limit order
+        const limitPrice = parseFloat(document.getElementById('buy-price').value);
+        
+        if (!limitPrice || limitPrice <= 0) {
+            showToast('Please enter valid limit price', 'error');
+            return;
+        }
+        
+        const feeRate = getTradingFee('maker');
+        const totalCost = amount * limitPrice;
+        const fee = totalCost * feeRate;
+        const totalWithFee = totalCost + fee;
+        
+        if (totalWithFee > usdBalance) {
+            showToast('Insufficient balance for limit order (including fees)', 'error');
+            return;
+        }
+        
+        // Create pending limit order
+        const pendingOrder = {
+            id: Date.now() + Math.random(),
+            type: 'buy',
+            orderType: 'limit',
+            market: currentMarket,
+            crypto: crypto,
+            amount: amount,
+            price: limitPrice,
+            totalCost: totalWithFee,
+            fee: fee,
+            feeRate: feeRate,
+            status: 'pending',
+            createdAt: new Date().toISOString()
+        };
+        
+        // Reserve balance for this order
+        usdBalance -= totalWithFee;
+        pendingOrders.push(pendingOrder);
+        
+        // Update UI
+        updateUI();
+        updatePendingOrdersDisplay();
+        saveUserData();
+        
+        showToast(`Limit buy order placed: ${amount} ${crypto} at $${limitPrice.toLocaleString('en-US', {minimumFractionDigits: 2})}`, 'success');
+        
+        // Clear inputs
+        document.getElementById('buy-amount').value = '';
+        document.getElementById('buy-price').value = currentPrice ? currentPrice.toFixed(2) : '';
+        return;
+    }
+    
+    // Market order logic
     if (!currentPrice || currentPrice <= 0) {
         showToast('Price data not available. Please wait for connection...', 'error');
         return;
     }
     
-    // Check order type (market or limit)
-    const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
-    const feeRate = orderType === 'limit' ? getTradingFee('maker') : getTradingFee('taker');
-    
+    const feeRate = getTradingFee('taker');
     const totalCost = amount * currentPrice;
     const fee = totalCost * feeRate;
     const totalWithFee = totalCost + fee;
-    const [crypto] = currentMarket.split('/');
     
     if (totalWithFee > usdBalance) {
         showToast('Insufficient balance (including fees)', 'error');
@@ -3117,6 +3201,178 @@ function executeBuy() {
     playTradingSound('buy');
 }
 
+// Update pending orders display
+function updatePendingOrdersDisplay() {
+    // We'll add this to the positions panel
+    const positionsContainer = document.getElementById('active-positions');
+    if (!positionsContainer) return;
+    
+    // Find or create pending orders section
+    let pendingOrdersSection = document.getElementById('pending-orders-section');
+    if (!pendingOrdersSection) {
+        pendingOrdersSection = document.createElement('div');
+        pendingOrdersSection.id = 'pending-orders-section';
+        pendingOrdersSection.innerHTML = `
+            <div class="section-header">
+                <h4>Pending Orders</h4>
+            </div>
+            <div id="pending-orders-list"></div>
+        `;
+        positionsContainer.insertBefore(pendingOrdersSection, positionsContainer.firstChild);
+    }
+    
+    const ordersList = document.getElementById('pending-orders-list');
+    if (pendingOrders.length === 0) {
+        pendingOrdersSection.style.display = 'none';
+        return;
+    }
+    
+    pendingOrdersSection.style.display = 'block';
+    ordersList.innerHTML = pendingOrders.map(order => {
+        const typeClass = order.type === 'buy' ? 'buy' : 'sell';
+        const priceFormatted = order.price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const amountFormatted = order.amount.toFixed(8);
+        
+        return `
+            <div class="pending-order-item ${typeClass}">
+                <div class="order-info">
+                    <span class="order-type">${order.type.toUpperCase()} ${order.crypto}</span>
+                    <span class="order-details">${amountFormatted} @ $${priceFormatted}</span>
+                </div>
+                <div class="order-actions">
+                    <button class="cancel-order-btn" data-order-id="${order.id}">Cancel</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Add event listeners for cancel buttons
+    ordersList.querySelectorAll('.cancel-order-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const orderId = parseFloat(e.target.dataset.orderId);
+            cancelPendingOrder(orderId);
+        });
+    });
+}
+
+// Cancel pending order
+function cancelPendingOrder(orderId) {
+    const orderIndex = pendingOrders.findIndex(order => order.id === orderId);
+    if (orderIndex === -1) return;
+    
+    const order = pendingOrders[orderIndex];
+    
+    // Refund reserved balance
+    if (order.type === 'buy') {
+        usdBalance += order.totalCost;
+    } else {
+        // Refund crypto balance
+        if (order.crypto === 'ETH') {
+            ethBalance += order.amount;
+        } else {
+            btcBalance += order.amount;
+        }
+    }
+    
+    // Remove order
+    pendingOrders.splice(orderIndex, 1);
+    
+    // Update UI
+    updateUI();
+    updatePendingOrdersDisplay();
+    saveUserData();
+    
+    showToast(`${order.type.charAt(0).toUpperCase() + order.type.slice(1)} order cancelled`, 'info');
+}
+
+// Check pending orders for execution
+function checkPendingOrders() {
+    if (pendingOrders.length === 0 || !currentPrice) return;
+    
+    const ordersToExecute = [];
+    
+    pendingOrders.forEach(order => {
+        // Check if market matches current market
+        if (order.market !== currentMarket) return;
+        
+        let shouldExecute = false;
+        
+        if (order.type === 'buy' && currentPrice <= order.price) {
+            shouldExecute = true; // Buy order executes when price drops to or below limit
+        } else if (order.type === 'sell' && currentPrice >= order.price) {
+            shouldExecute = true; // Sell order executes when price rises to or above limit
+        }
+        
+        if (shouldExecute) {
+            ordersToExecute.push(order);
+        }
+    });
+    
+    // Execute orders
+    ordersToExecute.forEach(order => {
+        executeLimitOrder(order);
+    });
+}
+
+// Execute limit order
+function executeLimitOrder(order) {
+    const orderIndex = pendingOrders.findIndex(o => o.id === order.id);
+    if (orderIndex === -1) return;
+    
+    if (order.type === 'buy') {
+        // Execute buy order
+        if (order.crypto === 'ETH') {
+            ethBalance += order.amount;
+        } else {
+            btcBalance += order.amount;
+        }
+        
+        // Record transaction
+        const transaction = {
+            type: 'buy',
+            market: order.market,
+            amount: order.amount,
+            price: order.price, // Use limit price, not current price
+            total: order.amount * order.price,
+            fee: order.fee,
+            time: new Date().toISOString()
+        };
+        transactions.push(transaction);
+        addTransactionToHistory(transaction);
+        
+    } else {
+        // Execute sell order - USD already calculated with limit price
+        usdBalance += order.totalRevenue;
+        
+        // Record transaction
+        const transaction = {
+            type: 'sell',
+            market: order.market,
+            amount: order.amount,
+            price: order.price, // Use limit price, not current price
+            total: order.amount * order.price,
+            fee: order.fee,
+            time: new Date().toISOString()
+        };
+        transactions.push(transaction);
+        addTransactionToHistory(transaction);
+    }
+    
+    // Remove executed order
+    pendingOrders.splice(orderIndex, 1);
+    
+    // Update UI
+    updateUI();
+    updatePendingOrdersDisplay();
+    saveUserData();
+    
+    const priceFormatted = order.price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    showToast(`Limit ${order.type} order executed: ${order.amount.toFixed(8)} ${order.crypto} at $${priceFormatted}`, 'success');
+    
+    // Play trading sound
+    playTradingSound(order.type);
+}
+
 // Execute sell order
 function executeSell() {
     const amount = parseFloat(document.getElementById('sell-amount').value);
@@ -3124,11 +3380,6 @@ function executeSell() {
     
     if (!amount || amount <= 0) {
         showToast('Please enter valid amount', 'error');
-        return;
-    }
-    
-    if (!currentPrice || currentPrice <= 0) {
-        showToast('Price data not available. Please wait for connection...', 'error');
         return;
     }
     
@@ -3140,7 +3391,65 @@ function executeSell() {
     
     // Check order type (market or limit)
     const orderType = document.querySelector('.order-type-btn.active')?.dataset.type || 'market';
-    const feeRate = orderType === 'limit' ? getTradingFee('maker') : getTradingFee('taker');
+    
+    if (orderType === 'limit') {
+        // Handle limit order
+        const limitPrice = parseFloat(document.getElementById('sell-price').value);
+        
+        if (!limitPrice || limitPrice <= 0) {
+            showToast('Please enter valid limit price', 'error');
+            return;
+        }
+        
+        const feeRate = getTradingFee('maker');
+        const totalRevenue = amount * limitPrice;
+        const fee = totalRevenue * feeRate;
+        const totalAfterFee = totalRevenue - fee;
+        
+        // Create pending limit order
+        const pendingOrder = {
+            id: Date.now() + Math.random(),
+            type: 'sell',
+            orderType: 'limit',
+            market: currentMarket,
+            crypto: crypto,
+            amount: amount,
+            price: limitPrice,
+            totalRevenue: totalAfterFee,
+            fee: fee,
+            feeRate: feeRate,
+            status: 'pending',
+            createdAt: new Date().toISOString()
+        };
+        
+        // Reserve crypto balance for this order
+        if (crypto === 'ETH') {
+            ethBalance -= amount;
+        } else {
+            btcBalance -= amount;
+        }
+        pendingOrders.push(pendingOrder);
+        
+        // Update UI
+        updateUI();
+        updatePendingOrdersDisplay();
+        saveUserData();
+        
+        showToast(`Limit sell order placed: ${amount} ${crypto} at $${limitPrice.toLocaleString('en-US', {minimumFractionDigits: 2})}`, 'success');
+        
+        // Clear inputs
+        document.getElementById('sell-amount').value = '';
+        document.getElementById('sell-price').value = currentPrice ? currentPrice.toFixed(2) : '';
+        return;
+    }
+    
+    // Market order logic
+    if (!currentPrice || currentPrice <= 0) {
+        showToast('Price data not available. Please wait for connection...', 'error');
+        return;
+    }
+    
+    const feeRate = getTradingFee('taker');
     
     const totalRevenue = amount * currentPrice;
     const fee = totalRevenue * feeRate;
@@ -3294,6 +3603,7 @@ function openLeveragePosition() {
     // Update UI
     updateUI();
     updateLeveragePositionsDisplay();
+    updatePendingOrdersDisplay();
     updateLeveragePositionLines(); // Add position line to chart
     
     // Save user data
@@ -4109,13 +4419,19 @@ function updateUI() {
         }
     }
     
-    // Update price display in trading forms
+    // Update price display in trading forms (only for market orders)
     const buyPriceEl = document.getElementById('buy-price');
     const sellPriceEl = document.getElementById('sell-price');
-    if (buyPriceEl && currentPrice > 0) {
+    const buyOrderTypeEl = document.getElementById('buy-order-type-market');
+    const sellOrderTypeEl = document.getElementById('sell-order-type-market');
+    
+    const currentBuyOrderType = buyOrderTypeEl && buyOrderTypeEl.classList.contains('active') ? 'market' : 'limit';
+    const currentSellOrderType = sellOrderTypeEl && sellOrderTypeEl.classList.contains('active') ? 'market' : 'limit';
+    
+    if (buyPriceEl && currentPrice > 0 && currentBuyOrderType === 'market') {
         buyPriceEl.value = currentPrice.toFixed(2);
     }
-    if (sellPriceEl && currentPrice > 0) {
+    if (sellPriceEl && currentPrice > 0 && currentSellOrderType === 'market') {
         sellPriceEl.value = currentPrice.toFixed(2);
     }
     
@@ -4294,8 +4610,14 @@ function updatePriceInputs(orderType) {
         sellPriceInput.placeholder = '0.00';
         buyPriceInput.readOnly = false;
         sellPriceInput.readOnly = false;
-        buyPriceInput.value = currentPrice ? currentPrice.toFixed(2) : '';
-        sellPriceInput.value = currentPrice ? currentPrice.toFixed(2) : '';
+        
+        // Only set current price if the input is empty
+        if (!buyPriceInput.value) {
+            buyPriceInput.value = currentPrice ? currentPrice.toFixed(2) : '';
+        }
+        if (!sellPriceInput.value) {
+            sellPriceInput.value = currentPrice ? currentPrice.toFixed(2) : '';
+        }
     }
     
     // Update fee displays when order type changes

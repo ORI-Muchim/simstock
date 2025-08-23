@@ -37,7 +37,8 @@
       "Bash(PORT=3001 npm start)",
       "Bash(start http://localhost:3001)",
       "Bash(start http://localhost:3000/monitoring.html)",
-      "Bash(move:*)"
+      "Bash(move:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
