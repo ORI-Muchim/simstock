@@ -424,7 +424,7 @@ class MonitoringDashboard {
             container.innerHTML = `
                 <div class="alert-item">
                     <div class="alert-icon">
-                        <i class="fas fa-info-circle" style="color: var(--accent-blue);"></i>
+                        <i class="fas fa-info-circle alert-icon-blue"></i>
                     </div>
                     <div class="alert-content">
                         <div class="alert-message">No active alerts</div>
@@ -438,8 +438,7 @@ class MonitoringDashboard {
         container.innerHTML = this.alerts.map(alert => `
             <div class="alert-item alert-${alert.severity}">
                 <div class="alert-icon">
-                    <i class="fas fa-${alert.severity === 'error' ? 'exclamation-triangle' : 'exclamation-circle'}" 
-                       style="color: var(--accent-${alert.severity === 'error' ? 'red' : 'yellow'});"></i>
+                    <i class="fas fa-${alert.severity === 'error' ? 'exclamation-triangle' : 'exclamation-circle'} alert-icon-${alert.severity === 'error' ? 'red' : 'yellow'}"></i>
                 </div>
                 <div class="alert-content">
                     <div class="alert-message">${alert.message}</div>
@@ -591,19 +590,8 @@ class MonitoringDashboard {
 
     showNotification(message, type = 'info') {
         const notification = document.createElement('div');
-        notification.className = `notification ${type}`;
+        notification.className = `notification notification-${type}`;
         notification.textContent = message;
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 12px 20px;
-            border-radius: 8px;
-            color: white;
-            background: ${type === 'success' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--accent-color)'};
-            z-index: 1000;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        `;
         
         document.body.appendChild(notification);
         

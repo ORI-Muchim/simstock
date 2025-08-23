@@ -117,14 +117,7 @@ class DataCollector {
                 const now = new Date();
                 const timeDiff = Math.abs(now.getTime() - timestamp) / (1000 * 60 * 60); // hours
                 
-                if (timeDiff > 24) {
-                    console.warn(`⚠️ Suspicious timestamp for ${market}:`, {
-                        timestamp,
-                        candleTime: candleTime.toISOString(),
-                        currentTime: now.toISOString(),
-                        diffHours: timeDiff.toFixed(1)
-                    });
-                }
+                // Timestamp validation removed to reduce log spam
                 
                 return {
                     instId: market,
@@ -157,15 +150,7 @@ class DataCollector {
         const candleKey = `${latestCandle.timestamp}_${latestCandle.close}_${latestCandle.volume}`;
         const now = Date.now();
         
-        // 🔍 디버깅: 키 정보 출력
-        console.log('🔍 saveCandles DEBUG:', {
-            broadcastKey: lastBroadcastKey,
-            candleKey: candleKey,
-            lastBroadcast: this.lastBroadcast[lastBroadcastKey],
-            isLocked: !!this.broadcastLock[lastBroadcastKey],
-            isDuplicate: this.lastBroadcast[lastBroadcastKey] === candleKey,
-            timeSinceLastBroadcast: this.lastBroadcastTime[lastBroadcastKey] ? now - this.lastBroadcastTime[lastBroadcastKey] : null
-        });
+        // Remove debug logging to reduce log spam
         
         // 스마트 중복 방지: 
         // 1) 완전히 같은 데이터는 30초 이내 스킵
@@ -175,13 +160,13 @@ class DataCollector {
         
         // 완전히 같은 데이터이고 최근에 브로드캐스트했으면 스킵
         if (isSameData && isRecentBroadcast) {
-            console.log('🔄 Skipping identical data broadcast for', lastBroadcastKey, 'within 30 seconds');
+            // Skip identical data broadcast within 30 seconds
             return;
         }
         
         // 가격이나 거래량이 변했으면 항상 브로드캐스트 허용
         if (!isSameData) {
-            console.log('🚀 Broadcasting updated candle data for', lastBroadcastKey, '- data changed');
+            // Broadcasting updated candle data - data changed
         }
         
         // 브로드캐스트 락 체크
@@ -235,7 +220,7 @@ class DataCollector {
                     const isRecentBroadcastAgain = this.lastBroadcastTime[lastBroadcastKey] && (now - this.lastBroadcastTime[lastBroadcastKey] < 3000);
                     
                     if (isSameDataAgain && isRecentBroadcastAgain) {
-                        console.log('🔄 Skipping duplicate broadcast in finalize for', lastBroadcastKey);
+                        // Skipping duplicate broadcast
                         delete this.broadcastLock[lastBroadcastKey]; // 락 해제
                         return;
                     }
@@ -265,9 +250,9 @@ class DataCollector {
                         // 브로드캐스트 추적 업데이트 (시간 포함)
                         this.lastBroadcast[lastBroadcastKey] = candleKey;
                         this.lastBroadcastTime[lastBroadcastKey] = now;
-                        console.log(`🔍 Broadcast ${lastBroadcastKey} completed`);
+                        // Broadcast completed
                     } catch (error) {
-                        console.error('🚨 Error calling broadcastCallback:', error);
+                        console.error('Error calling broadcastCallback:', error);
                     }
                     
                     // 브로드캐스트 완료 후 락 해제

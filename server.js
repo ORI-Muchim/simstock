@@ -52,7 +52,7 @@ const JWT_SECRET = (() => {
             console.error('CRITICAL SECURITY ERROR: JWT_SECRET environment variable is required in production!');
             process.exit(1);
         } else {
-            console.warn('⚠️  WARNING: Using development JWT secret. Set JWT_SECRET environment variable for production!');
+            console.warn('WARNING: Using development JWT secret. Set JWT_SECRET environment variable for production!');
             return 'dev_secret_' + require('crypto').randomBytes(32).toString('hex');
         }
     }
@@ -166,7 +166,7 @@ const corsOptions = {
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            console.warn(`❌ CORS blocked request from unauthorized origin: ${origin}`);
+            console.warn(`CORS blocked request from unauthorized origin: ${origin}`);
             callback(new Error(`CORS policy violation: Origin ${origin} is not allowed`));
         }
     },
@@ -499,6 +499,10 @@ function connectOKXWebSocket() {
 }
 
 // Helper function to broadcast to all clients with optimizations
+// Throttle broadcast failure logs to reduce spam
+let lastBroadcastFailureLog = 0;
+const BROADCAST_LOG_THROTTLE = 10000; // 10 seconds
+
 function broadcastToClients(data) {
     let sentCount = 0;
     let totalClients = 0;
@@ -517,7 +521,12 @@ function broadcastToClients(data) {
                     client.send(serializedData);
                     sentCount++;
                 } catch (error) {
-                    logger.warn('Failed to send message to client', error.message);
+                    // Only log individual send errors occasionally
+                    const now = Date.now();
+                    if (now - lastBroadcastFailureLog > BROADCAST_LOG_THROTTLE) {
+                        logger.warn('Failed to send message to client', error.message);
+                        lastBroadcastFailureLog = now;
+                    }
                     deadClients.push(client);
                 }
             }
@@ -535,9 +544,13 @@ function broadcastToClients(data) {
         }
     });
     
-    // Log only errors in broadcast
+    // Throttle broadcast failure warnings to reduce log spam
     if (sentCount === 0 && openClients > 0) {
-        logger.warn(`Failed to broadcast ${data.type} to ${openClients} clients`);
+        const now = Date.now();
+        if (now - lastBroadcastFailureLog > BROADCAST_LOG_THROTTLE) {
+            logger.warn(`Failed to broadcast ${data.type} to ${openClients} clients (monitoring clients excluded)`);
+            lastBroadcastFailureLog = now;
+        }
     }
 }
 
@@ -1136,7 +1149,7 @@ app.post('/api/register',
             const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
             
             logger.info(`New user registered: ${username}`);
-            res.json(createAPIResponse.success({ token, username }, 'User registered successfully'));
+            res.json({ success: true, token, username, message: 'User registered successfully', timestamp: new Date().toISOString() });
         } catch (error) {
             if (error.code === 'SQLITE_CONSTRAINT') {
                 res.status(400).json(createAPIResponse.error('This username is already taken', null, 400));
@@ -1212,7 +1225,7 @@ app.post('/api/login',
             
             const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
             logger.info(`User logged in: ${username}`);
-            res.json(createAPIResponse.success({ token, username: user.username }, 'Login successful'));
+            res.json({ success: true, token, username: user.username, message: 'Login successful', timestamp: new Date().toISOString() });
         } catch (error) {
             logger.error('Login error:', error);
             res.status(500).json(createAPIResponse.error('Login failed. Please try again later', null, 500));

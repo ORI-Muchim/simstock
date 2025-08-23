@@ -47,30 +47,30 @@ class MarketDataScheduler {
 
     async collectLatestCandles() {
         // 1분마다 실행되는 최신 1분봉 업데이트 (거래량 실시간 반영)
-        console.log('🕐 Collecting latest 1m candles...');
+        console.log('Collecting latest 1m candles...');
         
         for (const market of this.markets) {
             try {
                 // 최근 3개 캔들 가져오기 (현재 진행중인 캔들 + 완료된 캔들 2개)
                 const candles1m = await this.collector.fetchCandles(market, 1, 3);
                 if (candles1m.length > 0) {
-                    console.log(`📊 Fetched ${candles1m.length} latest candles for ${market}`);
+                    // Fetched latest candles
                     
                     // 최신 캔들 정보 로깅
                     const latestCandle = candles1m[candles1m.length - 1];
                     const candleTime = new Date(latestCandle.timestamp);
-                    console.log(`🚀 Latest ${market} candle: ${candleTime.toISOString()} - V:${latestCandle.volume} C:${latestCandle.close}`);
+                    // Latest candle processed
                     
                     // data-collector에서 스마트 중복 방지로 처리
                     this.collector.saveCandles(candles1m, '1m');
                 }
                 await new Promise(resolve => setTimeout(resolve, 500)); // 적절한 딜레이
             } catch (error) {
-                console.error(`❌ Error collecting latest candles for ${market}:`, error.message);
+                console.error(`Error collecting latest candles for ${market}:`, error.message);
             }
         }
         
-        console.log('✅ Latest candles collection completed');
+        console.log('Latest candles collection completed');
     }
     
     async collectRecentData() {
