@@ -16,12 +16,12 @@ export JWT_SECRET="your_generated_secret_here"
 
 ### 2. Environment Configuration
 
-1. Copy `.env.example` to `.env`:
+1. Create `.env` file (no `.env.example` provided):
    ```bash
-   cp .env.example .env
+   touch .env
    ```
 
-2. Update the following critical settings:
+2. Add the following critical settings:
    - `JWT_SECRET`: Use a secure 64+ character random string
    - `CORS_ORIGIN`: Set to your production domain(s)
    - `NODE_ENV`: Set to "production" for production deployments
@@ -42,20 +42,25 @@ export JWT_SECRET="your_generated_secret_here"
 ### Authentication & Authorization
 - **JWT Tokens**: 7-day expiration with secure secret
 - **Password Hashing**: Bcrypt with salt rounds (10)
-- **Rate Limiting**: 100 requests per 15 minutes per IP
-- **Session Management**: Automatic token cleanup
+- **Rate Limiting**: 
+  - General API: 100 requests per 15 minutes per IP
+  - Authentication endpoints: 5 attempts per 15 minutes (failed attempts only)
+- **Session Management**: Token-based authentication
 
 ### Content Security Policy (CSP)
-- Strict CSP headers blocking unsafe inline scripts/styles
-- Allowlisted external resources only
+- CSP headers with SHA256 hashes for inline styles
+- Development mode allows unsafe-inline for debugging
+- Allowlisted external resources (fonts.googleapis.com, cdnjs.cloudflare.com, unpkg.com, cdn.jsdelivr.net)
 - XSS attack prevention
-- Clickjacking protection
+- Clickjacking protection (X-Frame-Options: DENY)
 
 ### CORS Protection
-- Origin validation in production
-- Credential support with strict origin checking
-- Method and header restrictions
-- Request monitoring and logging
+- Origin validation in production (requires CORS_ORIGIN env variable)
+- Development mode allows localhost:3000, 127.0.0.1:3000, localhost:3001
+- Credential support enabled
+- Allowed methods: GET, POST, PUT, DELETE, OPTIONS
+- Allowed headers: Content-Type, Authorization, X-Requested-With
+- Preflight cache: 24 hours
 
 ### Additional Security Headers
 - X-Frame-Options: DENY
@@ -69,13 +74,15 @@ export JWT_SECRET="your_generated_secret_here"
 
 **Development Mode:**
 - Allows unsafe-inline CSS/JS for easier debugging
-- Permits all localhost origins
-- Uses generated JWT secret with warnings
+- Permits localhost origins (3000, 3001)
+- Auto-generates JWT secret with warning (not secure)
+- CORS logging enabled
 
 **Production Mode:**
-- Strict CSP without unsafe directives
-- Only specified origins allowed
-- Requires explicit JWT_SECRET or fails to start
+- CSP with SHA256 hashes for inline styles (no unsafe-inline)
+- Only CORS_ORIGIN environment variable domains allowed
+- Requires explicit JWT_SECRET (minimum 32 characters) or fails to start
+- No CORS logging
 
 ### Common Vulnerabilities Prevented
 
@@ -95,9 +102,11 @@ export JWT_SECRET="your_generated_secret_here"
 
 ### Log Monitoring
 Check logs for:
-- `❌ CORS blocked request from unauthorized origin`
-- `CRITICAL SECURITY ERROR: JWT_SECRET`
+- `CORS blocked request from unauthorized origin`
+- `CRITICAL SECURITY ERROR: JWT_SECRET environment variable is required in production!`
+- `SECURITY ERROR: JWT_SECRET must be at least 32 characters long!`
 - `Too many requests from this IP`
+- `Too many authentication attempts`
 - Failed authentication attempts
 
 ## 📞 Security Incident Response

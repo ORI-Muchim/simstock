@@ -1,295 +1,386 @@
-# CryptoSim - Professional Cryptocurrency Trading Simulator
+# CryptoSim - Real-time Cryptocurrency Trading Simulator
 
-A sophisticated cryptocurrency trading simulator built with real-time OKX market data, advanced charting, and comprehensive performance monitoring. Experience professional trading with zero risk.
+A professional cryptocurrency trading simulation platform using real-time data from OKX exchange. Practice and develop trading strategies without any financial risk.
 
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 ![Status](https://img.shields.io/badge/status-active-success)
 
+## 📋 Table of Contents
+- [Key Features](#-key-features)
+- [Quick Start](#-quick-start)
+- [System Architecture](#-system-architecture)
+- [API Documentation](#-api-documentation)
+- [Tech Stack](#-tech-stack)
+- [Project Structure](#-project-structure)
+
 ## ✨ Key Features
 
 ### 🔄 Real-time Trading
-- **Multi-Market Support**: BTC/USDT, ETH/USDT with easy expansion
-- **Live Price Feeds**: Real-time WebSocket connections to OKX
-- **Instant Order Book**: Live bid/ask spreads and market depth
-- **Zero Latency**: Sub-second price updates and trade execution
+- **Multi-Market Support**: BTC/USDT, ETH/USDT real-time trading
+- **WebSocket Live Data**: Direct connection to OKX exchange
+- **Real-time Order Book**: Bid/ask prices and market depth display
+- **Instant Execution**: Market/limit order simulation
 
-### 📊 Professional Charting
-- **TradingView Integration**: Industry-standard Lightweight Charts
-- **Multiple Timeframes**: 1m, 5m, 15m, 30m, 1h, 4h, 1d intervals
-- **Chart Types**: Candlestick, Line, and Volume overlay
-- **Interactive Tools**: Crosshair, zoom, pan, and price tracking
-- **Historical Data**: Comprehensive candle data with SQLite caching
+### 📊 Professional Charting System
+- **TradingView Charts**: Lightweight Charts library integration
+- **Multiple Timeframes**: 1m, 5m, 15m, 1h, 4h, 1d candles
+- **Technical Indicators**: 
+  - Moving Averages (MA/EMA)
+  - Bollinger Bands (BB)
+  - RSI (Relative Strength Index)
+  - MACD
+- **Chart Tools**: 
+  - Horizontal lines, Trend lines
+  - Fibonacci Retracement
+  - Chart screenshots
+- **Real-time Candle Updates**: Live updates via WebSocket
 
-### 💼 Advanced Trading Features
-- **Spot Trading**: Basic buy/sell operations with real-time P&L
-- **Leverage Trading**: Up to 100x leverage with dynamic risk management
-- **Position Management**: Real-time position tracking and partial closes
-- **Fee Calculation**: Accurate trading fees based on leverage tiers
-- **Transaction History**: Detailed trade logs and performance analytics
+### 💼 Trading Features
+- **Spot Trading**: Same fee structure as real exchanges (0.05%)
+- **Futures Trading**: 1x ~ 100x leverage support
+- **Position Management**: 
+  - Real-time P&L calculation
+  - Partial closing (25%, 50%, 75%, 100%)
+  - Average entry price tracking
+- **Auto Trading**: Automated trading features (requires separate implementation)
+- **Trade History**: Detailed trade logs and performance analysis
 
-### 🔐 User Management
-- **JWT Authentication**: Secure login/registration system
-- **Personal Portfolios**: Individual user balances and trading history
-- **Session Management**: Persistent login states and data recovery
-- **Multi-timezone Support**: Customizable chart timezone preferences
+### 🔐 User System
+- **JWT Authentication**: Secure token-based login
+- **Personal Portfolio**: Individual user balance management
+- **Trade Record Storage**: Permanent storage in SQLite DB
+- **Chart Settings Save**: Personalized chart configurations
 
 ### 📈 Performance Monitoring
-- **Real-time Metrics**: CPU, Memory, Response Time, WebSocket connections
-- **Monitoring Dashboard**: Professional performance analytics at `/monitoring.html`
-- **Alert System**: Configurable thresholds for system health
-- **Data Export**: JSON/CSV export for external analysis
-- **Historical Tracking**: 12 hours of performance data retention
+- **Real-time System Monitoring**: CPU, memory, response time tracking
+- **Monitoring Dashboard**: Dedicated `/monitoring` page
+- **Alert System**: Automatic alerts on threshold breaches
+- **Data Export**: JSON/CSV format support
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 18 or higher
-- npm or yarn package manager
+- Node.js 18.0 or higher
+- npm or yarn
+- Modern web browser (Chrome, Firefox, Safari, Edge)
 
 ### Installation
 
-1. **Clone and Install**
+1. **Clone Repository**
 ```bash
 git clone <repository-url>
 cd simstock
+```
+
+2. **Install Dependencies**
+```bash
 npm install
 ```
 
-2. **Start the Server**
+3. **Environment Variables** (Optional)
+Create `.env` file:
+```env
+PORT=3000
+NODE_ENV=production
+JWT_SECRET=your-secure-secret-key-here
+RATE_LIMIT_MAX_REQUESTS=100
+DEMO_MODE=false
+```
+
+4. **Start Server**
 ```bash
 # Production mode
 npm start
 
 # Development mode (auto-restart)
 npm run dev
+
+# Run tests
+npm test
 ```
 
-3. **Access the Application**
+5. **Access in Browser**
 ```
-Main Application: http://localhost:3000
-Login Page: http://localhost:3000/login.html
-Performance Monitor: http://localhost:3000/monitoring.html
-```
-
-## 📱 User Interface
-
-### Trading Dashboard
-- **Market Selector**: Easy switching between BTC/USDT and ETH/USDT
-- **Price Display**: Real-time price with 24h change indicators
-- **Balance Overview**: USD and crypto balance tracking
-- **Order Forms**: Intuitive buy/sell interfaces with amount calculators
-
-### Chart Interface
-- **Timeframe Selector**: Quick switching between intervals
-- **Chart Controls**: Zoom, pan, crosshair for detailed analysis
-- **Volume Bars**: Trading volume overlay with color coding
-- **Real-time Updates**: Live candle updates every second
-
-### Leverage Trading
-- **Position Types**: Long and Short positions
-- **Leverage Selector**: 1x to 100x multipliers
-- **Risk Management**: Real-time P&L calculation and margin tracking
-- **Position Controls**: Partial close options (25%, 50%, 75%, 100%)
-
-## 🏗️ Architecture
-
-### Backend Components
-```
-server.js                 - Main Express server and WebSocket handler
-database.js               - SQLite user data management
-scheduler.js               - Market data collection automation
-data-collector.js          - OKX API data fetching
-monitoring/
-  └── performance-monitor.js - System performance tracking
-config/
-  └── server-config.js     - Server configuration management
+Main Interface: http://localhost:3000
+Login: http://localhost:3000/login
+Trade History: http://localhost:3000/history
+Settings: http://localhost:3000/settings
+Monitoring: http://localhost:3000/monitoring
+API Docs: http://localhost:3000/api-docs
 ```
 
-### Frontend Components
+## 🏗 System Architecture
+
+### Backend Structure
+```
+simstock/
+├── server.js                 # Express server & WebSocket handler
+├── database.js              # SQLite database management
+├── data-collector.js        # OKX API data collection
+├── scheduler.js             # Periodic data collection scheduler
+├── monitoring/
+│   ├── alert-manager.js    # Alert management system
+│   └── performance-monitor.js # Performance monitoring
+├── utils/
+│   ├── logger.js           # Winston logging system
+│   └── websocket-manager.js # WebSocket connection management
+└── config/
+    ├── server-config.js    # Server configuration
+    └── swagger.js          # API documentation config
+```
+
+### Frontend Structure
 ```
 public/
-├── index.html            - Main trading interface
-├── login.html           - User authentication
-├── monitoring.html      - Performance dashboard
-├── script.js           - Combined application logic
-├── monitoring-dashboard.js - Real-time monitoring client
-└── styles.css          - Responsive UI styling
+├── index.html              # Main trading interface
+├── login.html              # Login/signup page
+├── history.html            # Trade history page
+├── settings.html           # User settings page
+├── monitoring.html         # System monitoring dashboard
+├── 404.html               # 404 error page
+├── css/
+│   ├── styles.css         # Main stylesheet
+│   ├── login.css          # Login page styles
+│   └── monitoring.css     # Monitoring dashboard styles
+└── js/
+    ├── script.js          # Main trading logic
+    ├── login.js           # Authentication handling
+    ├── history.js         # Trade history management
+    ├── settings.js        # Settings page logic
+    └── monitoring-dashboard.js # Monitoring client
 ```
 
-### Database Schema
-- **Users**: Authentication and profile data
-- **Market Data**: Historical candle data with multiple timeframes
-- **User Data**: Trading history, balances, and preferences
+### Database Structure
 
-## 🛠️ API Endpoints
+#### trading.db (User Data)
+- **users**: User authentication information
+- **user_data**: Balances, trade history, settings
+- **chart_settings**: Personalized chart settings
 
-### Market Data
-```
-GET  /api/markets                    - All market price summary
-GET  /api/price/:market             - Current price for specific market
-GET  /api/candles/:interval         - Historical candle data
-GET  /api/orderbook/:market         - Live order book depth
-GET  /api/history                   - Price history data
-```
+#### market_data.db (Market Data)
+- **candles**: All timeframe candle data
+  - 1m, 3m, 5m, 10m, 15m, 30m candles
+  - 1h, 4h, 1d candles
+  - Permanent storage (no automatic deletion)
 
-### User Management
-```
-POST /api/register                  - Create new user account
-POST /api/login                     - User authentication
-GET  /api/user/data                 - User profile and trading data
-POST /api/user/data                 - Update user data
-```
+## 📡 API Documentation
 
-### Performance Monitoring
-```
-GET  /api/monitoring/status         - Current system status
-GET  /api/monitoring/metrics/:type  - Historical performance metrics
-GET  /api/monitoring/export/:type   - Export metrics (JSON/CSV)
-POST /api/monitoring/reset-counters - Reset performance counters
-```
+### Authentication Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/register` | New user registration |
+| POST | `/api/login` | User login |
+| GET | `/api/user/data` | Get user data |
+| POST | `/api/user/data` | Update user data |
+
+### Market Data Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/markets` | All market overview |
+| GET | `/api/price/:market` | Current price for specific market |
+| GET | `/api/candles/:interval` | Candle chart data |
+| GET | `/api/orderbook/:market` | Order book data |
+| GET | `/api/history` | Price history |
+
+### Chart Settings Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/chart/settings` | Save chart settings |
+| GET | `/api/chart/settings/:market` | Get chart settings |
+| DELETE | `/api/chart/settings/:market` | Delete chart settings |
+
+### Monitoring Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/monitoring/status` | System status |
+| GET | `/api/monitoring/metrics/:type` | Performance metrics |
+| GET | `/api/monitoring/alerts` | Active alerts |
+| GET | `/api/monitoring/export/:type` | Export data |
 
 ### WebSocket Events
+```javascript
+// Client → Server
+{
+  type: 'subscribe',
+  market: 'BTC-USDT'
+}
+
+// Server → Client
+{
+  type: 'price_update',      // Real-time price
+  type: 'orderbook_update',   // Order book update
+  type: 'candle_update',      // Candle data
+  type: 'performance_metrics' // Performance metrics
+}
 ```
-price_update      - Real-time price changes
-orderbook_update  - Order book depth updates
-candle_update     - New candle data
-performance_metrics - System performance data
-performance_alert   - System health alerts
-```
+
+## 🛠 Tech Stack
+
+### Backend
+- **Node.js**: JavaScript runtime
+- **Express.js**: Web framework
+- **WebSocket (ws)**: Real-time communication
+- **SQLite3**: Database
+- **JWT**: User authentication
+- **bcrypt**: Password encryption
+- **Winston**: Logging system
+- **node-cron**: Task scheduling
+- **axios**: HTTP client
+
+### Frontend
+- **Lightweight Charts**: TradingView chart library
+- **Vanilla JavaScript**: Pure JS without frameworks
+- **CSS3**: Responsive design
+- **Font Awesome**: Icons
+- **WebSocket API**: Real-time data reception
+
+### DevOps & Testing
+- **Jest**: Unit testing
+- **Supertest**: API testing
+- **Nodemon**: Development server auto-restart
+- **ESLint**: Code quality management
+- **Swagger**: API documentation
 
 ## ⚙️ Configuration
 
-### Environment Variables
-```bash
-PORT=3000                    # Server port
-NODE_ENV=development         # Environment mode
-JWT_SECRET=your-secret-key   # JWT signing key
-LOG_LEVEL=info              # Logging level
-```
-
-### Market Configuration
-- **Supported Markets**: BTC/USDT, ETH/USDT
-- **Price Precision**: 2 decimal places
-- **Update Intervals**: Real-time WebSocket + 30-second fallback
-- **Data Retention**: 10,000 candles per timeframe
-
-### Trading Configuration
-- **Starting Balance**: $10,000 USD
-- **Spot Trading Fee**: 0.05%
-- **Leverage Fees**: 0.05% - 0.40% based on leverage tier
+### Trading Settings
+- **Initial Balance**: $10,000 USD (database default)
+- **Spot Trading Fee**: 0.05% (Taker)
+- **Futures Trading Fee**: 0.05% (Taker) - same for all leverage
 - **Maximum Leverage**: 100x
-- **Position Limits**: 50 concurrent positions
+- **Concurrent Position Limit**: No limit (up to memory constraints)
 
-## 📊 Performance Monitoring
+### System Settings
+- **WebSocket Ping Interval**: 25 seconds (keep-alive)
+- **API Response Time**: Typically under 200ms
+- **Chart Rendering**: Depends on TradingView Lightweight Charts performance
+- **Data Collection Schedule**:
+  - 1m candles: Every minute real-time (candle updates)
+  - 5m data: Every 5 minutes
+  - Full data: Every hour
+  - Comprehensive collection: Every 12 hours and daily at 6 AM
 
-The integrated monitoring system provides comprehensive insights:
+### Security Settings
+- **Rate Limiting**: 100 requests per 15 minutes per IP
+- **Auth Attempt Limit**: 5 attempts per 15 minutes
+- **CORS Policy**: Only configured domains allowed
+- **CSP (Content Security Policy)**: XSS attack prevention
+- **Helmet.js**: Automatic security headers
 
-### System Metrics
-- **CPU Usage**: Real-time processor utilization
-- **Memory Usage**: RAM consumption and availability
-- **Response Times**: API endpoint performance tracking
-- **WebSocket Connections**: Active connection monitoring
+## 📊 Monitoring System
 
-### Application Metrics
-- **Request Volume**: API calls per minute
-- **Error Rates**: Failed request percentages
-- **Trading Activity**: Position opens/closes per hour
-- **User Sessions**: Active user tracking
+### Tracked Metrics
+- **System Resources**
+  - CPU usage (Warning: 70%, Critical: 85%)
+  - Memory usage (Warning: 75%, Critical: 90%)
+  - Disk I/O
+  
+- **Application Performance**
+  - API response time (Warning: 2s, Critical: 5s)
+  - WebSocket connections count
+  - Requests per second (RPS)
+  - Error rate (Warning: 5%, Critical: 15%)
 
-### Alerts and Notifications
-- **CPU > 80%**: High processor usage warning
-- **Memory > 85%**: Memory pressure alert
-- **Response Time > 5s**: API performance degradation
-- **Error Rate > 10%**: Service reliability issues
+- **Trading Activity**
+  - Active users count
+  - Trades per hour
+  - Position open/close ratio
+
+### Alert System
+- Automatic alerts on threshold breach
+- Cooldown period: 5 minutes (prevents duplicate alerts)
+- Alert history storage
+- Webhook support (when environment variable is set)
 
 ## 🔒 Security Features
 
-- **JWT Authentication**: Secure token-based user sessions
-- **Password Hashing**: bcrypt with salt for secure storage
-- **CORS Protection**: Configurable cross-origin request policies
-- **Input Validation**: Comprehensive API input sanitization
-- **Rate Limiting**: Built-in protection against API abuse
+- **Password Security**: bcrypt hashing (salt rounds: 10)
+- **JWT Tokens**: 7-day expiry, signature verification
+- **Input Validation**: express-validator usage
+- **SQL Injection Prevention**: Prepared Statements
+- **XSS Prevention**: CSP headers and input escaping
+- **CSRF Prevention**: Token-based authentication
 
-## 🎯 Trading Features
+## 🎯 Feature Details
 
-### Spot Trading
-- Real-time price execution
-- Automatic fee calculation
-- Balance validation and updates
-- Transaction history tracking
+### Future Development Plans
+- Custom trading bots
+- Technical indicator-based auto buy/sell
+- Stop-loss/take-profit automation
+- Backtesting system
 
-### Leverage Trading
-- Dynamic leverage selection (1x-100x)
-- Real-time P&L calculation
-- Margin requirement validation
-- Liquidation risk monitoring
-- Partial position closing
+### Portfolio Management
+- Real-time asset valuation
+- ROI calculation (daily/weekly/monthly/total)
+- Automatic fee deduction
+- Detailed trade history CSV export
 
-### Risk Management
-- Position size limits
-- Leverage tier fee structure
-- Real-time margin calculation
-- Automatic liquidation alerts
+### Chart Analysis Tools
+- Multiple moving averages display
+- Volume profile
+- Support/resistance line auto-detection (planned)
+- Pattern recognition (planned)
 
-## 🌐 Browser Support
+## 🚨 Important Notice
 
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-
-## 📈 Performance
-
-- **WebSocket Latency**: < 50ms average
-- **API Response Time**: < 200ms typical
-- **Chart Rendering**: 60 FPS smooth animations
-- **Memory Usage**: < 100MB browser footprint
-- **Mobile Responsive**: Full feature parity on mobile devices
-
-## 🚨 Important Disclaimers
-
-⚠️ **This is a SIMULATION platform for educational purposes only**
+⚠️ **This is a simulation for educational purposes**
 - No real money or cryptocurrency is involved
-- All trades are simulated using virtual balances
-- Market data is real but trading is not executed on actual exchanges
+- All trades are simulated with virtual balances
+- Market data is real but trades are not executed on actual exchanges
 - Use this platform to learn trading strategies risk-free
+
+## 🐛 Known Issues
+
+- WebSocket reconnection delay on mobile Safari
+- Chart rendering delay with large datasets (5000+ candles)
+- Some CSS animation bugs in Firefox
+
+## 📈 Performance Optimization
+
+- Permanent candle data caching in SQLite database
+- Automatic WebSocket reconnection (5 seconds retry)
+- Maximum 5000 candles response limit (memory protection)
+- Broadcast failure log throttling (10 seconds)
+- Automatic dead WebSocket connection cleanup
+
+## 🔄 Update Log
+
+### v1.0.0 (Latest)
+- Initial release
+- Spot/futures trading features
+- Real-time charts and order book
+- User authentication system
+- Performance monitoring dashboard
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Fork this repository
+2. Create a new branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Create a Pull Request
 
-### Development Guidelines
-- Follow existing code style and structure
-- Add comprehensive comments for complex logic
-- Test all features before submitting PR
-- Update documentation for new features
+### Coding Standards
+- Follow ESLint configuration
+- Use camelCase for functions/variables
+- Use PascalCase for class names
+- Comments in English
+- Clear commit messages
 
 ## 📄 License
 
-This project is licensed under the ISC License - see the [LICENSE](LICENSE) file for details.
+This project is distributed under the ISC License.
 
 ## 🙏 Acknowledgments
 
-- **OKX**: Real-time market data provider
-- **TradingView**: Professional charting library
-- **Node.js Community**: Excellent runtime and ecosystem
-- **Express.js**: Robust web framework
-- **SQLite**: Reliable embedded database
-
-## 📞 Support
-
-For bug reports, feature requests, or general questions:
-- Create an issue on GitHub
-- Check existing issues for solutions
-- Review the code documentation
+- **OKX Exchange**: Real-time market data provider
+- **TradingView**: Lightweight Charts library
+- **Node.js Community**: Excellent ecosystem
+- All open-source contributors
 
 ---
 
 **Happy Trading! 📈💰**
 
-*Remember: This is a simulation. Real trading involves significant financial risk.*
+*Real trading involves significant financial risk. Practice thoroughly with this simulator before trading with real money.*
