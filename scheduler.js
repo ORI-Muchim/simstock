@@ -53,17 +53,7 @@ class MarketDataScheduler {
             try {
                 // 최근 3개 캔들 가져오기 (현재 진행중인 캔들 + 완료된 캔들 2개)
                 const candles1m = await this.collector.fetchCandles(market, 1, 3);
-                if (candles1m.length > 0) {
-                    // Fetched latest candles
-                    
-                    // 최신 캔들 정보 로깅
-                    const latestCandle = candles1m[candles1m.length - 1];
-                    const candleTime = new Date(latestCandle.timestamp);
-                    // Latest candle processed
-                    
-                    // data-collector에서 스마트 중복 방지로 처리
-                    this.collector.saveCandles(candles1m, '1m');
-                }
+                // fetchCandles 내부에서 이미 저장과 브로드캐스트가 처리됨
                 await new Promise(resolve => setTimeout(resolve, 500)); // 적절한 딜레이
             } catch (error) {
                 console.error(`Error collecting latest candles for ${market}:`, error.message);
@@ -103,7 +93,10 @@ class MarketDataScheduler {
                 for (const unit of timeframes) {
                     const candles = await this.collector.fetchCandles(market, unit, 50);
                     if (candles.length > 0) {
-                        this.collector.saveCandles(candles, candles[0].bar);
+                        // bar 정보를 명시적으로 전달
+                        const barMap = { 1: '1m', 5: '5m', 15: '15m', 60: '1H', 240: '4H', 1440: '1D' };
+                        const bar = barMap[unit] || '1m';
+                        this.collector.saveCandles(candles, bar);
                     }
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }

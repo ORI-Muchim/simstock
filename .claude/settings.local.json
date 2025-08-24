@@ -40,7 +40,16 @@
       "Bash(move:*)",
       "Bash(find:*)",
       "Bash(start http://localhost:3001/login.html)",
-      "Bash(start http://localhost:3000/monitoring)"
+      "Bash(start http://localhost:3000/monitoring)",
+      "Bash(copy trading.db backuptrading_backup.db)",
+      "Bash(copy market_data.db backupmarket_data_backup.db)",
+      "Bash(psql:*)",
+      "Bash(set PGPASSWORD=REDACTED_PASSWORD)",
+      "Bash(\"C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe\" -U postgres -h localhost -c \"CREATE DATABASE cryptosim;\")",
+      "Bash(\"C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe\" -U postgres -h localhost -c \"CREATE DATABASE cryptosim;\")",
+      "Bash(cmd:*)",
+      "Bash(create_db.bat)",
+      "Bash(del create_db.bat)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

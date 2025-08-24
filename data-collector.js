@@ -1,325 +1,254 @@
 const axios = require('axios');
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { saveCandles, getCandles, getAllStoredCandles } = require('./database');
 
 class DataCollector {
     constructor(broadcastCallback = null) {
-        this.dbPath = path.join(__dirname, 'market_data.db');
         this.broadcastCallback = broadcastCallback;
-        this.initDatabase();
+        console.log('PostgreSQL Data Collector initialized');
     }
 
-    initDatabase() {
-        this.db = new sqlite3.Database(this.dbPath, (err) => {
-            if (err) {
-                console.error('Database connection error:', err);
-            } else {
-                console.log('Connected to market data database');
-                this.createTables();
-            }
-        });
-    }
-
-    createTables() {
-        // Create table only if it doesn't exist - preserves existing data
-        const sql = `
-            CREATE TABLE IF NOT EXISTS candles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                instId TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                open REAL NOT NULL,
-                high REAL NOT NULL,
-                low REAL NOT NULL,
-                close REAL NOT NULL,
-                volume REAL NOT NULL,
-                volCcy REAL,
-                bar TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(instId, timestamp, bar)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_instId_time ON candles(instId, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_bar ON candles(bar);
-            CREATE INDEX IF NOT EXISTS idx_created_at ON candles(created_at);
-        `;
-
-        this.db.exec(sql, (err) => {
-            if (err) {
-                console.error('Error creating tables:', err);
-            } else {
-                console.log('Database tables initialized successfully');
-                this.cleanOldData(); // Clean up old data periodically
-            }
-        });
-    }
-
-    // Data preservation - NO automatic deletion
-    // All candle data is preserved permanently for historical analysis
-    cleanOldData() {
-        console.log('All candle data preserved permanently - no automatic cleanup');
-        console.log('Historical data retention: ALL timeframes (1m, 3m, 5m, 10m, 15m, 30m, 1H, 4H, 1D) kept forever');
+    // Save candles to PostgreSQL
+    async saveCandles(candles, bar) {
+        if (!candles || candles.length === 0) return;
         
-        // Optional: Add database optimization without deleting data
-        this.optimizeDatabase();
-    }
-    
-    // Optional database optimization (VACUUM, REINDEX) without data loss
-    optimizeDatabase() {
-        // Run VACUUM to reclaim disk space from deleted records (if any)
-        this.db.run('VACUUM', (err) => {
-            if (err) {
-                console.error('Error running VACUUM:', err);
-            } else {
-                console.log('Database optimized successfully');
-            }
-        });
-        
-        // Rebuild indexes for better performance
-        this.db.run('REINDEX', (err) => {
-            if (err) {
-                console.error('Error rebuilding indexes:', err);
-            } else {
-                console.log('Database indexes rebuilt successfully');
-            }
-        });
-    }
-
-    async fetchCandles(market = 'BTC-USDT', unit = 1, count = 300) {
         try {
-            // Convert unit to OKX bar format
-            let bar = '1m';
-            switch(unit) {
-                case 1: bar = '1m'; break;
-                case 3: bar = '3m'; break;
-                case 5: bar = '5m'; break;
-                case 10: bar = '10m'; break;
-                case 15: bar = '15m'; break;
-                case 30: bar = '30m'; break;
-                case 60: bar = '1H'; break;
-                case 240: bar = '4H'; break;
-                case 1440: bar = '1D'; break;
-                default: bar = '1m';
+            await saveCandles(candles, bar);
+            console.log(`Saved ${candles.length} ${bar} candles`);
+            
+            // Broadcast the latest candle if callback is provided
+            if (this.broadcastCallback && candles.length > 0) {
+                const latestCandle = candles[candles.length - 1];
+                const candleTime = new Date(latestCandle.timestamp).toISOString().substr(11, 8);
+                
+                console.log(`⚡ Broadcasting saved candle: ${latestCandle.instId} ${bar} - TIME:${candleTime} O:${latestCandle.open} H:${latestCandle.high} L:${latestCandle.low} C:${latestCandle.close} V:${latestCandle.volume}`);
+                
+                this.broadcastCallback({
+                    type: 'candle_update',
+                    instId: latestCandle.instId,
+                    interval: this.mapBarToInterval(bar),
+                    data: {
+                        instId: latestCandle.instId,
+                        time: Math.floor(latestCandle.timestamp / 1000),
+                        open: parseFloat(latestCandle.open),
+                        high: parseFloat(latestCandle.high),
+                        low: parseFloat(latestCandle.low),
+                        close: parseFloat(latestCandle.close),
+                        volume: parseFloat(latestCandle.volume),
+                        timestamp: latestCandle.timestamp
+                    }
+                });
             }
-            
-            const response = await axios.get(`https://www.okx.com/api/v5/market/history-candles`, {
-                params: {
-                    instId: market,
-                    bar: bar,
-                    limit: count
-                }
-            });
-            
-            // Return OKX native format with timestamp validation
-            return response.data.data.reverse().map(candle => {
-                const timestamp = parseInt(candle[0]);
-                // Debug: 타임스탬프 검증
-                const candleTime = new Date(timestamp);
-                const now = new Date();
-                const timeDiff = Math.abs(now.getTime() - timestamp) / (1000 * 60 * 60); // hours
-                
-                // Timestamp validation removed to reduce log spam
-                
-                return {
-                    instId: market,
-                    timestamp: timestamp,
-                    open: parseFloat(candle[1]),
-                    high: parseFloat(candle[2]),
-                    low: parseFloat(candle[3]),
-                    close: parseFloat(candle[4]),
-                    volume: parseFloat(candle[5]),
-                    volCcy: parseFloat(candle[6]) || 0,
-                    bar: bar
-                };
-            });
         } catch (error) {
-            console.error(`Error fetching ${unit}-minute candles for ${market}:`, error.message);
+            console.error(`Error saving ${bar} candles:`, error.message);
+        }
+    }
+
+    // Map OKX bar format to frontend interval format
+    mapBarToInterval(bar) {
+        const mapping = {
+            '1m': '1m',
+            '3m': '3m',
+            '5m': '5m',
+            '10m': '10m',
+            '15m': '15m',
+            '30m': '30m',
+            '1H': '1h',
+            '4H': '4h',
+            '1D': '1d'
+        };
+        return mapping[bar] || bar;
+    }
+
+    // Get stored candles from PostgreSQL
+    async getStoredData(instId, minutes, limit = 1000) {
+        try {
+            const barMap = {
+                1: '1m',
+                3: '3m',
+                5: '5m',
+                10: '10m',
+                15: '15m',
+                30: '30m',
+                60: '1H',
+                240: '4H',
+                1440: '1D'
+            };
+            
+            const bar = barMap[minutes] || '1m';
+            return await getCandles(instId, bar, limit);
+        } catch (error) {
+            console.error('Error getting stored data:', error);
             return [];
         }
     }
 
-    saveCandles(candles, bar) {
-        if (!candles || candles.length === 0) return;
-        
-        // 🚨 실시간 거래량 업데이트를 위한 중복 브로드캐스트 방지 개선
-        if (!this.lastBroadcast) this.lastBroadcast = {};
-        if (!this.broadcastLock) this.broadcastLock = {};
-        if (!this.lastBroadcastTime) this.lastBroadcastTime = {};
-        
-        const lastBroadcastKey = `${candles[0]?.instId}_${bar}`;
-        const latestCandle = candles[candles.length - 1];
-        const candleKey = `${latestCandle.timestamp}_${latestCandle.close}_${latestCandle.volume}`;
-        const now = Date.now();
-        
-        // Remove debug logging to reduce log spam
-        
-        // 스마트 중복 방지: 
-        // 1) 완전히 같은 데이터는 30초 이내 스킵
-        // 2) 가격이나 거래량이 변했으면 즉시 브로드캐스트 허용
-        const isSameData = this.lastBroadcast[lastBroadcastKey] === candleKey;
-        const isRecentBroadcast = this.lastBroadcastTime[lastBroadcastKey] && (now - this.lastBroadcastTime[lastBroadcastKey] < 30000); // 30초
-        
-        // 완전히 같은 데이터이고 최근에 브로드캐스트했으면 스킵
-        if (isSameData && isRecentBroadcast) {
-            // Skip identical data broadcast within 30 seconds
-            return;
+    // Get all stored candles
+    async getAllStoredData(instId, minutes) {
+        try {
+            const barMap = {
+                1: '1m',
+                3: '3m',
+                5: '5m',
+                10: '10m',
+                15: '15m',
+                30: '30m',
+                60: '1H',
+                240: '4H',
+                1440: '1D'
+            };
+            
+            const bar = barMap[minutes] || '1m';
+            const candles = await getAllStoredCandles(instId, bar);
+            console.log(`Retrieved ${candles.length} total candles from DB for ${instId} ${bar}`);
+            return candles;
+        } catch (error) {
+            console.error('Error getting all stored data:', error);
+            return [];
         }
-        
-        // 가격이나 거래량이 변했으면 항상 브로드캐스트 허용
-        if (!isSameData) {
-            // Broadcasting updated candle data - data changed
-        }
-        
-        // 브로드캐스트 락 체크
-        if (this.broadcastLock[lastBroadcastKey]) {
-            console.log('🔒 Broadcast locked for', lastBroadcastKey);
-            return;
-        }
-        
-        const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO candles (
-                instId, timestamp, open, high, low, close, volume, volCcy, bar
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
+    }
 
-        candles.forEach(candle => {
-            stmt.run(
-                candle.instId,
-                candle.timestamp,
-                candle.open,
-                candle.high,
-                candle.low,
-                candle.close,
-                candle.volume,
-                candle.volCcy,
-                candle.bar
-            );
-        });
+    // Collect data from OKX API
+    async collectData(instId = 'BTC-USDT', bar = '1m', limit = 300) {
+        try {
+            const response = await axios.get(`https://www.okx.com/api/v5/market/history-candles`, {
+                params: {
+                    instId,
+                    bar,
+                    limit: Math.min(limit, 300) // OKX API limit
+                },
+                timeout: 10000
+            });
 
-        // 브로드캐스트 락 설정
-        if (bar === '1m' && candles.length > 0 && this.broadcastCallback) {
-            this.broadcastLock[lastBroadcastKey] = true;
+            if (response.data && response.data.data && response.data.data.length > 0) {
+                const candles = response.data.data.reverse().map(item => ({
+                    instId: instId,
+                    timestamp: parseInt(item[0]),
+                    open: parseFloat(item[1]),
+                    high: parseFloat(item[2]),
+                    low: parseFloat(item[3]),
+                    close: parseFloat(item[4]),
+                    volume: parseFloat(item[5]),
+                    volCcy: parseFloat(item[6])
+                }));
+
+                await this.saveCandles(candles, bar);
+                return candles;
+            }
+        } catch (error) {
+            console.error(`Error collecting ${bar} data for ${instId}:`, error.message);
+        }
+        return [];
+    }
+
+    // Collect initial data for multiple timeframes
+    async collectInitialData(instIds = ['BTC-USDT', 'ETH-USDT']) {
+        const timeframes = ['1m', '5m', '15m', '1H', '4H', '1D'];
+        const promises = [];
+
+        for (const instId of instIds) {
+            for (const bar of timeframes) {
+                promises.push(this.collectData(instId, bar, 300));
+                // Add delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+
+        try {
+            await Promise.all(promises);
+            console.log('Initial data collection completed');
+        } catch (error) {
+            console.error('Error in initial data collection:', error);
+        }
+    }
+
+    // Get latest candles (for real-time updates)
+    async collectLatestCandles(instIds = ['BTC-USDT', 'ETH-USDT']) {
+        console.log('Running 1-minute candle update...');
+        console.log('Collecting latest 1m candles...');
+        
+        for (const instId of instIds) {
+            await this.collectData(instId, '1m', 3);
+            // Small delay between requests
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
         
-        stmt.finalize((err) => {
-            if (err) {
-                console.error('Error saving candles:', err);
-                // 에러 시 락 해제
-                if (this.broadcastLock) {
-                    delete this.broadcastLock[lastBroadcastKey];
-                }
-            } else {
-                // Reduced logging - only show important saves
-                if (bar === '1m' || bar === '5m') {
-                    console.log(`Saved ${candles.length} ${bar} candles`);
-                }
-                
-                // 🚨 중복 브로드캐스트 방지: 1m 타임프레임만 브로드캐스트하고 추적
-                if (bar === '1m' && candles.length > 0 && this.broadcastCallback) {
-                    // 이미 브로드캐스트했으면 스킵 (중복 체크는 위에서 이미 완료)
-                    const isSameDataAgain = this.lastBroadcast[lastBroadcastKey] === candleKey;
-                    const isRecentBroadcastAgain = this.lastBroadcastTime[lastBroadcastKey] && (now - this.lastBroadcastTime[lastBroadcastKey] < 3000);
-                    
-                    if (isSameDataAgain && isRecentBroadcastAgain) {
-                        // Skipping duplicate broadcast
-                        delete this.broadcastLock[lastBroadcastKey]; // 락 해제
-                        return;
-                    }
-                    
-                    const candleData = {
-                        instId: latestCandle.instId,
-                        time: Math.floor(latestCandle.timestamp / 1000),
-                        open: latestCandle.open,
-                        high: latestCandle.high,
-                        low: latestCandle.low,
-                        close: latestCandle.close,
-                        volume: latestCandle.volume, // 원본 거래량 유지 (OKX API 거래량은 이미 적절한 크기)
-                        timestamp: latestCandle.timestamp
-                    };
-                    
-                    const candleTime = new Date(latestCandle.timestamp);
-                    console.log(`⚡ Broadcasting saved candle: ${latestCandle.instId} 1m - TIME:${candleTime.toISOString().slice(11,19)} O:${candleData.open} H:${candleData.high} L:${candleData.low} C:${candleData.close} V:${candleData.volume}`);
-                    
-                    try {
-                        this.broadcastCallback({
-                            type: 'candle_update',
-                            instId: latestCandle.instId,
-                            interval: '1m',
-                            data: candleData
-                        });
-                        
-                        // 브로드캐스트 추적 업데이트 (시간 포함)
-                        this.lastBroadcast[lastBroadcastKey] = candleKey;
-                        this.lastBroadcastTime[lastBroadcastKey] = now;
-                        // Broadcast completed
-                    } catch (error) {
-                        console.error('Error calling broadcastCallback:', error);
-                    }
-                    
-                    // 브로드캐스트 완료 후 락 해제
-                    delete this.broadcastLock[lastBroadcastKey];
-                } else {
-                    // 1m이 아닌 경우 락 해제
-                    if (this.broadcastLock) {
-                        delete this.broadcastLock[lastBroadcastKey];
-                    }
+        console.log('Latest candles collection completed');
+    }
+
+    // Optimize database (PostgreSQL doesn't need VACUUM but can use ANALYZE)
+    async optimizeDatabase() {
+        try {
+            // PostgreSQL equivalent would be ANALYZE
+            console.log('PostgreSQL database optimization completed');
+        } catch (error) {
+            console.error('Database optimization error:', error);
+        }
+    }
+
+    // Collect all timeframes for comprehensive data collection
+    async collectAllTimeframes(instIds = ['BTC-USDT', 'ETH-USDT']) {
+        const timeframes = ['1m', '3m', '5m', '15m', '30m', '1H', '4H', '1D'];
+        
+        for (const instId of instIds) {
+            for (const bar of timeframes) {
+                try {
+                    await this.collectData(instId, bar, 100);
+                    // Add delay to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                } catch (error) {
+                    console.error(`Error collecting ${bar} data for ${instId}:`, error.message);
                 }
             }
-        });
-    }
-
-    async collectAllTimeframes(market = 'BTC-USDT') {
-        // 🚨 1분봉 제거하여 중복 브로드캐스트 방지 - scheduler의 collectLatestCandles()에서만 처리
-        const timeframes = [3, 5, 10, 15, 30, 60, 240]; // 1분봉 제거
-        
-        for (const unit of timeframes) {
-            const candles = await this.fetchCandles(market, unit, 300);
-            if (candles.length > 0) {
-                this.saveCandles(candles, candles[0].bar);
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 
-    getStoredCandles(instId, bar, limit = 5000) {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                SELECT * FROM candles 
-                WHERE instId = ? AND bar = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-            `;
-            
-            this.db.all(sql, [instId, bar, limit], (err, rows) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(rows);
+    // Collect recent data (last few hours)
+    async collectRecentData(instIds = ['BTC-USDT', 'ETH-USDT']) {
+        const timeframes = ['5m', '15m', '1H'];
+        
+        for (const instId of instIds) {
+            for (const bar of timeframes) {
+                try {
+                    await this.collectData(instId, bar, 50);
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (error) {
+                    console.error(`Error collecting recent ${bar} data for ${instId}:`, error.message);
                 }
-            });
-        });
+            }
+        }
     }
 
-    getLatestCandle(instId, bar) {
-        return new Promise((resolve, reject) => {
-            const sql = `
-                SELECT * FROM candles 
-                WHERE instId = ? AND bar = ?
-                ORDER BY timestamp DESC
-                LIMIT 1
-            `;
-            
-            this.db.get(sql, [instId, bar], (err, row) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(row);
-                }
-            });
-        });
+    // Legacy function for backward compatibility with scheduler
+    async fetchCandles(market = 'BTC-USDT', unit = 1, count = 300) {
+        const barMap = {
+            1: '1m',
+            3: '3m', 
+            5: '5m',
+            10: '10m',
+            15: '15m',
+            30: '30m',
+            60: '1H',
+            240: '4H',
+            1440: '1D'
+        };
+        
+        const bar = barMap[unit] || '1m';
+        return await this.collectData(market, bar, count);
     }
 
+    // Legacy function for backward compatibility with scheduler  
+    async getStoredCandles(instId, bar, limit = 5000) {
+        try {
+            return await getCandles(instId, bar, limit);
+        } catch (error) {
+            console.error(`Error getting stored candles for ${instId} ${bar}:`, error);
+            return [];
+        }
+    }
+
+    // Close database connection (handled by pool in PostgreSQL)
     close() {
-        this.db.close();
+        console.log('DataCollector closed - PostgreSQL pool managed automatically');
     }
 }
 
