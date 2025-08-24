@@ -42,6 +42,13 @@ db.serialize(() => {
         }
     });
 
+    // Add role column to existing user_data table if it doesn't exist
+    db.run(`ALTER TABLE user_data ADD COLUMN role TEXT DEFAULT 'user'`, (err) => {
+        if (err && !err.message.includes('duplicate column')) {
+            console.error('Error adding role column:', err);
+        }
+    });
+
     // Chart settings table
     db.run(`
         CREATE TABLE IF NOT EXISTS chart_settings (
@@ -123,7 +130,9 @@ const authenticateUser = (username, password) => {
 const getUserData = (userId) => {
     return new Promise((resolve, reject) => {
         db.get(
-            `SELECT ud.*, u.created_at as member_since 
+            `SELECT ud.id, ud.user_id, ud.usd_balance, ud.btc_balance, 
+                    ud.transactions, ud.leverage_positions, ud.timezone, 
+                    ud.updated_at, ud.role, u.created_at as member_since 
              FROM user_data ud 
              JOIN users u ON ud.user_id = u.id 
              WHERE ud.user_id = ?`,
@@ -147,9 +156,9 @@ const updateUserData = (userId, data) => {
         
         db.run(
             `UPDATE user_data 
-             SET usd_balance = ?, btc_balance = ?, transactions = ?, leverage_positions = ?, timezone = ?, updated_at = CURRENT_TIMESTAMP
+             SET usd_balance = ?, btc_balance = ?, transactions = ?, leverage_positions = ?, timezone = ?, role = ?, updated_at = CURRENT_TIMESTAMP
              WHERE user_id = ?`,
-            [data.usdBalance, data.btcBalance, transactions, leveragePositions, data.timezone || 'UTC', userId],
+            [data.usdBalance, data.btcBalance, transactions, leveragePositions, data.timezone || 'UTC', data.role || 'user', userId],
             (err) => {
                 if (err) return reject(err);
                 resolve();

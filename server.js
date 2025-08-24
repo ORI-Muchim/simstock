@@ -1272,7 +1272,8 @@ app.get('/api/user/data', authenticateToken, async (req, res) => {
             transactions: userData.transactions,
             leveragePositions: userData.leverage_positions,
             timezone: userData.timezone || 'UTC',
-            memberSince: userData.member_since
+            memberSince: userData.member_since,
+            role: userData.role || 'user'
         };
         res.json(createAPIResponse.success(responseData, 'User data retrieved successfully'));
     } catch (error) {

@@ -38,7 +38,9 @@
       "Bash(start http://localhost:3001)",
       "Bash(start http://localhost:3000/monitoring.html)",
       "Bash(move:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(start http://localhost:3001/login.html)",
+      "Bash(start http://localhost:3000/monitoring)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
