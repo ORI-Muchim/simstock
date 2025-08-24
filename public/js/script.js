@@ -3926,6 +3926,7 @@ function forceLiquidation(position) {
         size: position.size,
         margin: position.margin,
         loss: totalLoss,
+        openingFee: position.openingFee || 0,
         time: new Date().toISOString()
     };
     
@@ -4191,7 +4192,7 @@ function updateTransactionHistory() {
         } else if (transaction.type === 'liquidation') {
             // Liquidation transactions
             typeClass = 'liquidation';
-            typeText = '🚨 LIQUIDATED';
+            typeText = 'LIQUIDATED';
             
             const positionType = transaction.positionType || 'unknown';
             const leverage = transaction.leverage || 1;

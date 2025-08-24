@@ -534,12 +534,36 @@ function renderTransactionTable(transactionList) {
             const pnlValue = transaction.pnl || 0;
             
             price = `$${Number.isFinite(exitPrice) ? exitPrice.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
-            total = `${transaction.percentage || 100}% Close`;
-            fee = `$${Number.isFinite(openingFee) ? openingFee.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            const percentage = Number.isFinite(transaction.percentage) && transaction.percentage > 0 && transaction.percentage <= 100 ? transaction.percentage : 100;
+            total = `${percentage}% Close`;
+            
+            // Calculate total fees for close transactions (opening fee + closing fee)
+            const totalTransactionFees = (transaction.totalFees) || (transaction.openingFee || 0) + (transaction.closingFee || 0);
+            fee = `$${Number.isFinite(totalTransactionFees) ? totalTransactionFees.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
             const formattedPnl = Number.isFinite(pnlValue) ? pnlValue.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
             pnl = `<span class="${pnlValue >= 0 ? 'pnl-positive' : 'pnl-negative'}">
                 ${pnlValue >= 0 ? '+' : ''}$${formattedPnl}
             </span>`;
+        } else if (transaction.type === 'liquidation') {
+            // Liquidation transactions
+            typeClass = 'liquidation';
+            typeText = 'LIQUIDATED';
+            
+            const positionType = transaction.positionType || 'unknown';
+            const leverage = transaction.leverage || 1;
+            const entryPrice = transaction.entryPrice || 0;
+            const liquidationPrice = transaction.liquidationPrice || 0;
+            const loss = transaction.loss || 0;
+            
+            amount = `${positionType.toUpperCase()} ${leverage}x`;
+            price = `$${Number.isFinite(entryPrice) ? entryPrice.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            total = `Liq: $${Number.isFinite(liquidationPrice) ? liquidationPrice.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            
+            // For liquidations, show the opening fee that was already paid
+            const liquidationFee = transaction.openingFee || 0;
+            fee = `$${Number.isFinite(liquidationFee) ? liquidationFee.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}`;
+            const formattedLoss = Number.isFinite(loss) ? Math.abs(loss).toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+            pnl = `<span class="pnl-negative">$-${formattedLoss}</span>`;
         } else {
             typeClass = 'neutral';
             typeText = (transaction.type || 'UNKNOWN').toUpperCase();
@@ -580,11 +604,11 @@ function filterTransactions() {
 
 // Calculate and display trading statistics
 function calculateTradingStats() {
-    const totalTrades = transactions.length;
     let winningTrades = 0;
     let losingTrades = 0;
     let totalPnl = 0;
     let totalFees = 0;
+    let actualTradingDecisions = 0; // Only count actual trading decisions (close positions/liquidations)
     
     // Calculate initial asset value
     const initialAssets = 10000;
@@ -593,16 +617,31 @@ function calculateTradingStats() {
     const totalReturnPercent = (totalReturn / initialAssets) * 100;
     
     transactions.forEach(transaction => {
-        // Calculate fees
-        if (transaction.fee) {
-            totalFees += transaction.fee;
-        }
-        if (transaction.openingFee) {
-            totalFees += transaction.openingFee;
+        // Calculate fees for different transaction types
+        if (transaction.type === 'buy' || transaction.type === 'sell') {
+            // Spot trading fees - only count each transaction once
+            if (transaction.fee) {
+                totalFees += transaction.fee;
+            }
+        } else if (transaction.type?.startsWith('close_')) {
+            // Leverage position closing fees - use totalFees if available, otherwise sum components
+            if (transaction.totalFees) {
+                totalFees += transaction.totalFees;
+            } else {
+                const openingFee = transaction.openingFee || 0;
+                const closingFee = transaction.closingFee || 0;
+                totalFees += openingFee + closingFee;
+            }
+        } else if (transaction.type === 'liquidation') {
+            // Liquidation fees (opening fee was already paid when position opened)
+            if (transaction.openingFee) {
+                totalFees += transaction.openingFee;
+            }
         }
         
-        // Calculate P&L for leverage positions
+        // Count actual trading decisions and their P&L
         if (transaction.type?.startsWith('close_') && transaction.pnl !== undefined) {
+            actualTradingDecisions++;
             totalPnl += transaction.pnl;
             if (transaction.pnl > 0) {
                 winningTrades++;
@@ -611,17 +650,17 @@ function calculateTradingStats() {
             }
         }
         
-        // Calculate P&L for spot trades (simplified)
-        if (transaction.type === 'sell' && transaction.amount && transaction.price) {
-            // This is a simplification - real P&L calculation would need to track cost basis
-            const estimatedPnl = transaction.amount * transaction.price * 0.1; // Rough estimate
-            if (estimatedPnl > 0) winningTrades++;
-            else losingTrades++;
+        if (transaction.type === 'liquidation' && transaction.loss !== undefined) {
+            actualTradingDecisions++;
+            totalPnl -= transaction.loss; // Loss is positive, so subtract
+            losingTrades++;
         }
     });
     
-    const winRate = totalTrades > 0 ? ((winningTrades / totalTrades) * 100) : 0;
-    const avgPnl = (winningTrades + losingTrades) > 0 ? (totalPnl / (winningTrades + losingTrades)) : 0;
+    // Use actual trading decisions for statistics, not all transactions (buy/sell are just entries/exits)
+    const totalTrades = transactions.length;
+    const winRate = actualTradingDecisions > 0 ? ((winningTrades / actualTradingDecisions) * 100) : 0;
+    const avgPnl = actualTradingDecisions > 0 ? (totalPnl / actualTradingDecisions) : 0;
     
     // Update displays with safe formatting
     const formattedAssets = Number.isFinite(currentAssets) ? currentAssets.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
@@ -635,7 +674,7 @@ function calculateTradingStats() {
     document.getElementById('total-return').textContent = (totalReturnPercent >= 0 ? '+' : '') + totalReturnPercent.toFixed(2) + '%';
     document.getElementById('total-return').className = `stat-value ${totalReturnPercent >= 0 ? 'positive' : 'negative'}`;
     
-    document.getElementById('total-trades').textContent = totalTrades.toString();
+    document.getElementById('total-trades').textContent = actualTradingDecisions.toString();
     document.getElementById('winning-trades').textContent = winningTrades.toString();
     document.getElementById('losing-trades').textContent = losingTrades.toString();
     document.getElementById('win-rate').textContent = winRate.toFixed(1) + '%';
@@ -673,9 +712,19 @@ function exportToCSV() {
             type = `CLOSE_${positionType.toUpperCase()}`;
             amount = `${transaction.leverage}x`;
             price = (transaction.exitPrice || 0).toFixed(2);
-            total = `${transaction.percentage || 100}%`;
-            fee = (transaction.openingFee || 0).toFixed(2);
+            const percentage = Number.isFinite(transaction.percentage) && transaction.percentage > 0 && transaction.percentage <= 100 ? transaction.percentage : 100;
+            total = `${percentage}%`;
+            const totalTransactionFees = (transaction.totalFees) || (transaction.openingFee || 0) + (transaction.closingFee || 0);
+            fee = totalTransactionFees.toFixed(2);
             pnl = (transaction.pnl || 0).toFixed(2);
+        } else if (transaction.type === 'liquidation') {
+            const positionType = transaction.positionType || 'unknown';
+            type = 'LIQUIDATED';
+            amount = `${positionType.toUpperCase()} ${transaction.leverage || 1}x`;
+            price = (transaction.entryPrice || 0).toFixed(2);
+            total = `Liq: ${(transaction.liquidationPrice || 0).toFixed(2)}`;
+            fee = (transaction.openingFee || 0).toFixed(2);
+            pnl = (-(transaction.loss || 0)).toFixed(2);
         } else {
             type = transaction.type || 'UNKNOWN';
             amount = '0';

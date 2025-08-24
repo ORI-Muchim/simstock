@@ -2311,6 +2311,12 @@ body {
     color: var(--accent-blue);
 }
 
+.transaction-type.liquidation {
+    background: rgba(255, 90, 95, 0.2);
+    color: var(--accent-red);
+    font-weight: 700;
+}
+
 .pnl-positive {
     color: var(--accent-green);
 }
@@ -2893,12 +2899,8 @@ span[data-percentage] {
 
 /* Liquidation transaction styles */
 .transaction-type.liquidation {
-    background: var(--accent-red);
-    color: white;
-    font-weight: bold;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.85em;
+    background: rgba(139, 148, 158, 0.1);
+    color: var(--text-secondary);
 }
 
 .liquidation-details {
