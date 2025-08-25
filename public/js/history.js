@@ -652,7 +652,7 @@ function calculateTradingStats() {
         
         if (transaction.type === 'liquidation' && transaction.loss !== undefined) {
             actualTradingDecisions++;
-            totalPnl -= transaction.loss; // Loss is positive, so subtract
+            totalPnl += transaction.loss; // Loss is already negative in script.js (totalLoss = -position.margin)
             losingTrades++;
         }
     });
@@ -667,8 +667,9 @@ function calculateTradingStats() {
     document.getElementById('total-assets').textContent = '$' + formattedAssets;
     document.getElementById('total-assets').className = 'stat-value';
     
-    const formattedTotalReturn = Number.isFinite(totalReturn) ? totalReturn.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
-    document.getElementById('total-pnl').textContent = (totalReturn >= 0 ? '+' : '') + '$' + formattedTotalReturn;
+    // Total P&L should be the total asset change (same as totalReturn)
+    const formattedTotalPnl = Number.isFinite(totalReturn) ? totalReturn.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00';
+    document.getElementById('total-pnl').textContent = (totalReturn >= 0 ? '+' : '') + '$' + formattedTotalPnl;
     document.getElementById('total-pnl').className = `stat-value ${totalReturn >= 0 ? 'positive' : 'negative'}`;
     
     document.getElementById('total-return').textContent = (totalReturnPercent >= 0 ? '+' : '') + totalReturnPercent.toFixed(2) + '%';
@@ -724,7 +725,7 @@ function exportToCSV() {
             price = (transaction.entryPrice || 0).toFixed(2);
             total = `Liq: ${(transaction.liquidationPrice || 0).toFixed(2)}`;
             fee = (transaction.openingFee || 0).toFixed(2);
-            pnl = (-(transaction.loss || 0)).toFixed(2);
+            pnl = (transaction.loss || 0).toFixed(2); // loss is already negative
         } else {
             type = transaction.type || 'UNKNOWN';
             amount = '0';
