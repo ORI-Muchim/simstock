@@ -607,6 +607,59 @@
         </div>
     </div>
 
+    <!-- Community Chat -->
+    <div class="chat-container" id="chat-container">
+        <div class="chat-header">
+            <div class="chat-title">
+                <i class="fas fa-comments"></i>
+                Community Chat
+                <span class="online-count" id="online-count">(0 online)</span>
+            </div>
+            <button class="chat-minimize" id="chat-minimize">
+                <i class="fas fa-minus"></i>
+            </button>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-welcome">
+                Welcome to CryptoSim Community Chat!<br>
+                Share your trades and strategies with other traders.
+            </div>
+        </div>
+        <div class="chat-input-wrapper">
+            <div class="chat-suggestions" id="chat-suggestions" style="display: none;">
+                <div class="suggestion-item" data-command="/share">
+                    <span class="suggestion-command">/share</span>
+                    <span class="suggestion-desc">Share your last trade</span>
+                </div>
+                <div class="suggestion-item" data-command="/help">
+                    <span class="suggestion-command">/help</span>
+                    <span class="suggestion-desc">Show available commands</span>
+                </div>
+                <div class="suggestion-item" data-command="/stats">
+                    <span class="suggestion-command">/stats</span>
+                    <span class="suggestion-desc">Show your trading statistics</span>
+                </div>
+                <div class="suggestion-item" data-command="/clear">
+                    <span class="suggestion-command">/clear</span>
+                    <span class="suggestion-desc">Clear chat history (local)</span>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" class="chat-input" id="chat-input" placeholder="Type a message..." maxlength="500">
+                <button class="chat-send" id="chat-send">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Chat Button -->
+    <button class="chat-toggle" id="chat-toggle">
+        <i class="fas fa-comment-dots"></i>
+        <span class="chat-notification" id="chat-notification" style="display: none;">0</span>
+    </button>
+
     <script src="js/script.js?v=1.0.9"></script>
+    <script src="js/chat.js"></script>
 </body>
 </html>

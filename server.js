@@ -9,7 +9,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
-const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings } = require('./database');
+const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings, saveChatMessage, getChatHistory } = require('./database');
 const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
 const AlertManager = require('./monitoring/alert-manager');
@@ -260,8 +260,12 @@ const server = app.listen(PORT, () => {
     logger.info(`JWT Secret configured: ${JWT_SECRET ? 'Yes' : 'No'}`);
 });
 
-// WebSocket Server
-const wss = new WebSocket.Server({ server });
+// WebSocket Server for market data (use noServer to handle upgrade manually)
+const wss = new WebSocket.Server({ noServer: true });
+
+// WebSocket Server for chat
+const chatWss = new WebSocket.Server({ noServer: true });
+const chatClients = new Map(); // Store authenticated chat clients
 
 // OKX WebSocket Connection
 let okxWs = null;
@@ -1412,7 +1416,169 @@ app.delete('/api/chart/settings/:market', authenticateToken, async (req, res) =>
     }
 });
 
-// WebSocket connection handler
+// Handle WebSocket upgrade for chat
+server.on('upgrade', (request, socket, head) => {
+    const pathname = request.url;
+    
+    if (pathname === '/chat') {
+        chatWss.handleUpgrade(request, socket, head, (ws) => {
+            chatWss.emit('connection', ws, request);
+        });
+    } else {
+        wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit('connection', ws, request);
+        });
+    }
+});
+
+// Chat WebSocket connection handler
+chatWss.on('connection', (ws) => {
+    let userId = null;
+    let username = null;
+    let isAuthenticated = false;
+    
+    ws.on('message', async (message) => {
+        try {
+            const data = JSON.parse(message);
+            
+            if (data.type === 'auth') {
+                // Authenticate user with JWT token
+                try {
+                    const decoded = jwt.verify(data.token, JWT_SECRET);
+                    userId = decoded.userId;
+                    username = data.username || decoded.username;
+                    isAuthenticated = true;
+                    
+                    // Store client
+                    chatClients.set(ws, { userId, username });
+                    
+                    // Send chat history
+                    const history = await getChatHistory(50);
+                    ws.send(JSON.stringify({
+                        type: 'history',
+                        messages: history.map(msg => ({
+                            ...msg,
+                            timestamp: msg.created_at,
+                            // Ensure metadata is parsed if it's a string
+                            metadata: typeof msg.metadata === 'string' ? 
+                                JSON.parse(msg.metadata) : msg.metadata
+                        }))
+                    }));
+                    
+                    // Send online count
+                    broadcastOnlineCount();
+                    
+                    // Notify others that user joined
+                    broadcastSystemMessage(`${username} joined the chat`);
+                    
+                } catch (error) {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Authentication failed'
+                    }));
+                    ws.close();
+                }
+            } else if (isAuthenticated) {
+                // Handle authenticated messages
+                if (data.type === 'message') {
+                    // Save to database
+                    const savedMessage = await saveChatMessage(
+                        userId,
+                        username,
+                        data.message,
+                        'message'
+                    );
+                    
+                    // Broadcast to all clients
+                    broadcastChatMessage({
+                        type: 'message',
+                        username: username,
+                        message: data.message,
+                        timestamp: savedMessage.created_at
+                    });
+                    
+                } else if (data.type === 'trade_share') {
+                    // Save trade share to database
+                    const metadata = {
+                        tradeType: data.tradeType,
+                        leverage: data.leverage,
+                        entryPrice: data.entryPrice,
+                        exitPrice: data.exitPrice,
+                        pnl: data.pnl
+                    };
+                    
+                    const savedMessage = await saveChatMessage(
+                        userId,
+                        username,
+                        data.message,
+                        'trade_share',
+                        metadata
+                    );
+                    
+                    // Broadcast trade share
+                    broadcastChatMessage({
+                        type: 'trade_share',
+                        username: username,
+                        message: data.message,
+                        ...metadata,
+                        timestamp: savedMessage.created_at
+                    });
+                }
+            }
+        } catch (error) {
+            logger.error('Chat message error:', error);
+        }
+    });
+    
+    ws.on('close', () => {
+        if (isAuthenticated && username) {
+            chatClients.delete(ws);
+            broadcastOnlineCount();
+            broadcastSystemMessage(`${username} left the chat`);
+        }
+    });
+    
+    ws.on('error', (error) => {
+        logger.error('Chat WebSocket error:', error);
+    });
+});
+
+// Broadcast functions for chat
+function broadcastChatMessage(data) {
+    const message = JSON.stringify(data);
+    chatClients.forEach((client, ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(message);
+        }
+    });
+}
+
+function broadcastSystemMessage(text) {
+    const message = JSON.stringify({
+        type: 'system',
+        message: text
+    });
+    chatClients.forEach((client, ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(message);
+        }
+    });
+}
+
+function broadcastOnlineCount() {
+    const count = chatClients.size;
+    const message = JSON.stringify({
+        type: 'online_count',
+        count: count
+    });
+    chatClients.forEach((client, ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(message);
+        }
+    });
+}
+
+// WebSocket connection handler for market data
 wss.on('connection', (ws, req) => {
     // Initially assume it's a trading client
     ws.isMonitoringClient = false;

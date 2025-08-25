@@ -291,6 +291,84 @@ const getAllStoredCandles = async (instId, bar) => {
     }
 };
 
+// Chat functions
+const saveChatMessage = async (userId, username, message, messageType = 'message', metadata = null) => {
+    try {
+        const result = await pool.query(`
+            INSERT INTO chat_messages (user_id, username, message, message_type, metadata) 
+            VALUES ($1, $2, $3, $4, $5) 
+            RETURNING id, user_id, username, message, message_type, metadata, created_at
+        `, [userId, username, message, messageType, metadata]);
+        
+        return result.rows[0];
+    } catch (error) {
+        console.error('Error saving chat message:', error);
+        throw error;
+    }
+};
+
+const getChatHistory = async (limit = 50) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, user_id, username, message, message_type, metadata, created_at 
+            FROM chat_messages 
+            ORDER BY created_at DESC 
+            LIMIT $1
+        `, [limit]);
+        
+        return result.rows.reverse(); // Reverse to get chronological order
+    } catch (error) {
+        console.error('Error getting chat history:', error);
+        throw error;
+    }
+};
+
+const deleteChatMessage = async (messageId, userId) => {
+    try {
+        const result = await pool.query(`
+            DELETE FROM chat_messages 
+            WHERE id = $1 AND user_id = $2 
+            RETURNING id
+        `, [messageId, userId]);
+        
+        return result.rowCount > 0;
+    } catch (error) {
+        console.error('Error deleting chat message:', error);
+        throw error;
+    }
+};
+
+// Initialize chat messages table
+const initializeChatTable = async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                username VARCHAR(50) NOT NULL,
+                message TEXT NOT NULL,
+                message_type VARCHAR(20) DEFAULT 'message',
+                metadata JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Create index for faster queries
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at 
+            ON chat_messages(created_at DESC)
+        `);
+        
+        console.log('Chat messages table initialized');
+    } catch (error) {
+        console.error('Error initializing chat table:', error);
+    }
+};
+
+// Call initialization on startup
+initializeChatTable();
+
 // Graceful shutdown
 const closePool = async () => {
     await pool.end();
@@ -315,5 +393,9 @@ module.exports = {
     saveCandles,
     getCandles,
     getAllStoredCandles,
+    // Chat functions
+    saveChatMessage,
+    getChatHistory,
+    deleteChatMessage,
     closePool
 };
