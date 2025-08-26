@@ -2,6 +2,9 @@
 // Last Updated: 2025-08-23 20:03:00
 // Global variables
 let positionLocks = new Map(); // Track position locks to prevent race conditions
+let transactionCache = new Map(); // Cache for transaction calculations
+let intervalIds = new Set(); // Track all interval IDs for cleanup
+let timeoutIds = new Set(); // Track all timeout IDs for cleanup
 let ws = null;
 let currentPrice = 0;
 let usdBalance = 1000; // Starting balance $1000
@@ -802,8 +805,20 @@ async function saveUserData() {
 
 // 🚫 REMOVED: Force volume update - OKX API에서만 거래량 가져오기
 
-// WebSocket connection
+// WebSocket connection with memory leak prevention
 function initializeWebSocket() {
+    // Close existing WebSocket connection to prevent memory leaks
+    if (ws) {
+        console.log('Closing existing WebSocket connection');
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+        }
+    }
+    
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     ws = new WebSocket(wsUrl);
@@ -923,20 +938,37 @@ function initializeWebSocket() {
     ws.onclose = () => {
         console.log('WebSocket disconnected');
         showToast('Server disconnected. Reconnecting...', 'info');
-        setTimeout(initializeWebSocket, 5000);
+        safeSetTimeout(initializeWebSocket, 5000);
     };
 }
 
-// Initialize TradingView Lightweight Chart
+// Initialize TradingView Lightweight Chart with proper cleanup
 function initializeTradingViewChart() {
     const chartContainer = document.getElementById('tradingview-chart');
     
     console.log('Initializing chart...');
     console.log('LightweightCharts available:', typeof window.LightweightCharts !== 'undefined');
     
+    // Destroy existing chart to prevent memory leaks
+    if (chart) {
+        console.log('Destroying existing chart instance');
+        try {
+            if (candleSeries) chart.removeSeries(candleSeries);
+            if (lineSeries) chart.removeSeries(lineSeries);
+            if (volumeSeries) chart.removeSeries(volumeSeries);
+            chart.remove();
+        } catch (error) {
+            console.error('Error destroying chart:', error);
+        }
+        chart = null;
+        candleSeries = null;
+        lineSeries = null;
+        volumeSeries = null;
+    }
+    
     if (typeof window.LightweightCharts === 'undefined') {
         console.error('LightweightCharts library not loaded!');
-        setTimeout(initializeTradingViewChart, 500);
+        safeSetTimeout(initializeTradingViewChart, 500);
         return;
     }
     
@@ -4273,13 +4305,96 @@ function updateTransactionHistory() {
     }).join('');
 }
 
-// Add transaction to history display
+// Add transaction to history display with cache invalidation
 function addTransactionToHistory(transaction) {
+    // Invalidate transaction cache when new transaction is added
+    if (transaction && transaction.market) {
+        const crypto = transaction.market.split('/')[0];
+        // Clear cache entries for this crypto
+        for (const [key] of transactionCache) {
+            if (key.startsWith(`${crypto}_`)) {
+                transactionCache.delete(key);
+            }
+        }
+    }
+    
     // Just refresh the entire history display
     updateTransactionHistory();
 }
 
-// Calculate spot profit/loss for each cryptocurrency
+// Safe setTimeout wrapper with tracking
+function safeSetTimeout(callback, delay) {
+    const timeoutId = setTimeout(() => {
+        timeoutIds.delete(timeoutId);
+        callback();
+    }, delay);
+    timeoutIds.add(timeoutId);
+    return timeoutId;
+}
+
+// Safe setInterval wrapper with tracking
+function safeSetInterval(callback, interval) {
+    const intervalId = setInterval(callback, interval);
+    intervalIds.add(intervalId);
+    return intervalId;
+}
+
+// Clear all tracked timeouts and intervals
+function clearAllTimers() {
+    timeoutIds.forEach(id => clearTimeout(id));
+    intervalIds.forEach(id => clearInterval(id));
+    timeoutIds.clear();
+    intervalIds.clear();
+}
+
+// Comprehensive cleanup function for memory leak prevention
+function cleanupAll() {
+    console.log('Performing comprehensive cleanup...');
+    
+    // Clear all timers
+    clearAllTimers();
+    
+    // Close WebSocket connection
+    if (ws) {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+        }
+        ws = null;
+    }
+    
+    // Destroy chart instance
+    if (chart) {
+        try {
+            if (candleSeries) chart.removeSeries(candleSeries);
+            if (lineSeries) chart.removeSeries(lineSeries);
+            if (volumeSeries) chart.removeSeries(volumeSeries);
+            chart.remove();
+        } catch (error) {
+            console.error('Error during chart cleanup:', error);
+        }
+        chart = null;
+        candleSeries = null;
+        lineSeries = null;
+        volumeSeries = null;
+    }
+    
+    // Clear transaction cache
+    if (transactionCache) {
+        transactionCache.clear();
+    }
+    
+    console.log('Cleanup completed');
+}
+
+// Setup cleanup on page unload
+window.addEventListener('beforeunload', cleanupAll);
+window.addEventListener('unload', cleanupAll);
+
+// Calculate spot profit/loss for each cryptocurrency (optimized with caching)
 function calculateSpotProfitLoss() {
     const spotProfits = {};
     
@@ -4288,7 +4403,6 @@ function calculateSpotProfitLoss() {
         const [crypto] = market.split('-');
         const currentBalance = crypto === 'ETH' ? ethBalance : btcBalance;
         
-        
         if (currentBalance <= 0) {
             spotProfits[crypto] = {
                 totalInvested: 0,
@@ -4296,6 +4410,26 @@ function calculateSpotProfitLoss() {
                 profit: 0,
                 profitPercent: 0,
                 averageBuyPrice: 0
+            };
+            return;
+        }
+        
+        // Check cache first
+        const cacheKey = `${crypto}_${transactions.length}_${currentBalance}`;
+        if (transactionCache.has(cacheKey)) {
+            const cached = transactionCache.get(cacheKey);
+            const currentMarketPrice = marketPrices[market]?.price || currentPrice;
+            const currentValue = currentBalance * currentMarketPrice;
+            const totalInvested = currentBalance * cached.averageBuyPrice;
+            const profit = currentValue - totalInvested;
+            const profitPercent = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
+            
+            spotProfits[crypto] = {
+                totalInvested,
+                currentValue,
+                profit,
+                profitPercent,
+                averageBuyPrice: cached.averageBuyPrice
             };
             return;
         }
@@ -4330,6 +4464,10 @@ function calculateSpotProfitLoss() {
                 }
             }
         });
+        
+        // Cache the calculation result
+        transactionCache.set(cacheKey, { averageBuyPrice });
+        
         const currentMarketPrice = marketPrices[market]?.price || currentPrice;
         const currentValue = currentBalance * currentMarketPrice;
         const totalInvested = currentBalance * averageBuyPrice;
