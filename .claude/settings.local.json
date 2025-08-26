@@ -49,7 +49,8 @@
       "Bash(\"C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe\" -U postgres -h localhost -c \"CREATE DATABASE cryptosim;\")",
       "Bash(cmd:*)",
       "Bash(create_db.bat)",
-      "Bash(del create_db.bat)"
+      "Bash(del create_db.bat)",
+      "Bash(start http://localhost:3000/?page=markets)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

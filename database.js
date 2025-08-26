@@ -1,5 +1,9 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+const Decimal = require('decimal.js');
+
+// Configure Decimal.js for financial precision
+Decimal.config({ precision: 28, rounding: 4 });
 
 // Create PostgreSQL connection pool
 const pool = new Pool({
@@ -105,8 +109,15 @@ const getUserData = async (userId) => {
 };
 
 const updateUserData = async (userId, data) => {
+    const client = await pool.connect();
+    
     try {
-        await pool.query(`
+        await client.query('BEGIN');
+        
+        // Add row-level locking to prevent concurrent updates
+        await client.query('SELECT * FROM user_data WHERE user_id = $1 FOR UPDATE', [userId]);
+        
+        await client.query(`
             UPDATE user_data 
             SET usd_balance = $1, btc_balance = $2, transactions = $3, 
                 leverage_positions = $4, timezone = $5, role = $6, updated_at = CURRENT_TIMESTAMP
@@ -120,17 +131,26 @@ const updateUserData = async (userId, data) => {
             data.role || 'user',
             userId
         ]);
+        
+        await client.query('COMMIT');
     } catch (error) {
+        await client.query('ROLLBACK');
         throw error;
+    } finally {
+        client.release();
     }
 };
 
 // Chart settings functions
 const saveChartSettings = async (userId, market, settings) => {
+    const client = await pool.connect();
+    
     try {
+        await client.query('BEGIN');
+        
         const { indicators, indicatorSettings, drawings, chartType } = settings;
         
-        await pool.query(`
+        await client.query(`
             INSERT INTO chart_settings 
             (user_id, market, indicators, indicator_settings, drawings, chart_type)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -149,8 +169,13 @@ const saveChartSettings = async (userId, market, settings) => {
             JSON.stringify(drawings || []),
             chartType || 'candlestick'
         ]);
+        
+        await client.query('COMMIT');
     } catch (error) {
+        await client.query('ROLLBACK');
         throw error;
+    } finally {
+        client.release();
     }
 };
 

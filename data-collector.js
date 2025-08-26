@@ -20,7 +20,7 @@ class DataCollector {
                 const latestCandle = candles[candles.length - 1];
                 const candleTime = new Date(latestCandle.timestamp).toISOString().substr(11, 8);
                 
-                console.log(`⚡ Broadcasting saved candle: ${latestCandle.instId} ${bar} - TIME:${candleTime} O:${latestCandle.open} H:${latestCandle.high} L:${latestCandle.low} C:${latestCandle.close} V:${latestCandle.volume}`);
+                console.log(`Broadcasting saved candle: ${latestCandle.instId} ${bar} - TIME:${candleTime} O:${latestCandle.open} H:${latestCandle.high} L:${latestCandle.low} C:${latestCandle.close} V:${latestCandle.volume}`);
                 
                 this.broadcastCallback({
                     type: 'candle_update',

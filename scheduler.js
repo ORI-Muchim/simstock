@@ -66,7 +66,7 @@ class MarketDataScheduler {
     async collectRecentData() {
         for (const market of this.markets) {
             try {
-                // 🚨 1분봉 수집 제거 - collectLatestCandles()에서만 처리하여 중복 방지
+                // 1분봉 수집 제거 - collectLatestCandles()에서만 처리하여 중복 방지
                 // const candles1m = await this.collector.fetchCandles(market, 1, 10);
                 // if (candles1m.length > 0) {
                 //     this.collector.saveCandles(candles1m, '1m');
@@ -87,7 +87,7 @@ class MarketDataScheduler {
     async collectFullData() {
         for (const market of this.markets) {
             try {
-                // 🚨 1분봉 제거하여 중복 브로드캐스트 방지 - collectLatestCandles()에서만 처리
+                // 1분봉 제거하여 중복 브로드캐스트 방지 - collectLatestCandles()에서만 처리
                 const timeframes = [5, 15, 30, 60]; // 1분봉 제거
                 
                 for (const unit of timeframes) {

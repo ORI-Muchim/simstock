@@ -1,6 +1,7 @@
 // Version: 1.0.7 - Fixed duplicate orderType variable declaration
 // Last Updated: 2025-08-23 20:03:00
 // Global variables
+let positionLocks = new Map(); // Track position locks to prevent race conditions
 let ws = null;
 let currentPrice = 0;
 let usdBalance = 1000; // Starting balance $1000
@@ -231,6 +232,20 @@ function switchPage(page) {
         document.querySelector('.nav-item[data-page="trade"]').classList.add('active');
         // Remove page parameter from URL when switching to trade
         window.history.replaceState({}, '', '/');
+        
+        // Initialize chart if not already initialized
+        if (!chart) {
+            setTimeout(() => {
+                initializeTradingViewChart();
+                // Wait a bit more for chart to be fully initialized before loading candles
+                setTimeout(() => {
+                    loadCandles(currentInterval);
+                }, 200);
+            }, 100);
+        } else if (!chartInitialized) {
+            // Reload chart data if chart exists but not initialized
+            loadCandles(currentInterval);
+        }
     }
 }
 
@@ -451,7 +466,7 @@ function selectMarket(market) {
     // Reset chart initialization state and reload chart with new market data
     chartInitialized = false;
     
-    // 🚨 마켓 변경 시 볼륨 데이터 플래그 리셋
+    // 마켓 변경 시 볼륨 데이터 플래그 리셋
     volumeDataLoaded = false;
     
     if (typeof loadCandles === 'function') {
@@ -520,10 +535,15 @@ function initializeApp() {
     // Load initial price data
     loadInitialPriceData();
     
-    // Initialize chart after a short delay
-    setTimeout(() => {
-        initializeTradingViewChart();
-    }, 100);
+    // Initialize chart only if we're on the trade page
+    const urlParams = new URLSearchParams(window.location.search);
+    const page = urlParams.get('page');
+    if (!page || page === 'trade') {
+        // Only initialize chart if we're on the trade page
+        setTimeout(() => {
+            initializeTradingViewChart();
+        }, 100);
+    }
 }
 
 // Load initial price data for current market
@@ -796,10 +816,10 @@ function initializeWebSocket() {
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         
-        // 🚨 ENHANCED DEBUG: 모든 WebSocket 메시지 상세 로깅
+        // ENHANCED DEBUG: 모든 WebSocket 메시지 상세 로깅
         const timestamp = new Date().toISOString().slice(11, 19);
         if (data.type === 'candle_update') {
-            console.log(`🎯🎯🎯 [${timestamp}] CANDLE_UPDATE RECEIVED!`, {
+            console.log(`[${timestamp}] CANDLE_UPDATE RECEIVED!`, {
                 instId: data.instId,
                 interval: data.interval,
                 volume: data.data?.volume,
@@ -851,7 +871,7 @@ function initializeWebSocket() {
             case 'candle_update':
                 if (data.instId) {
                     const market = data.instId.replace('-', '/');
-                    console.log('📊 Received candle_update:', {
+                    console.log('Received candle_update:', {
                         market,
                         currentMarket,
                         interval: data.interval,
@@ -880,10 +900,10 @@ function initializeWebSocket() {
                     }
                     // Also update if it exactly matches current market and interval (other timeframes)
                     else if (market === currentMarket && data.interval === currentInterval && data.data) {
-                        console.log('📊 Updating candle for current interval:', data.interval);
+                        console.log('Updating candle for current interval:', data.interval);
                         updateRealtimeCandleData(data.data);
                     } else {
-                        console.log('📊 Skipping candle_update (different market/interval)', {
+                        console.log('Skipping candle_update (different market/interval)', {
                             receivedMarket: market,
                             currentMarket: currentMarket,
                             receivedInterval: data.interval,
@@ -901,7 +921,7 @@ function initializeWebSocket() {
     };
     
     ws.onclose = () => {
-        console.log('❌ WebSocket disconnected');
+        console.log('WebSocket disconnected');
         showToast('Server disconnected. Reconnecting...', 'info');
         setTimeout(initializeWebSocket, 5000);
     };
@@ -997,7 +1017,7 @@ function initializeTradingViewChart() {
             priceScaleId: 'volume',
         });
         
-        console.log('📊 Volume series created:', !!volumeSeries);
+        console.log('Volume series created:', !!volumeSeries);
         
         // Configure volume scale
         chart.priceScale('volume').applyOptions({
@@ -1334,7 +1354,7 @@ function updatePrice(data) {
                 formattedVolume = '$' + data.volume.toFixed(0);
             }
             volumeElement.textContent = formattedVolume;
-            console.log('📊 Updated 24h volume display:', formattedVolume, 'from raw:', data.volume);
+            console.log('Updated 24h volume display:', formattedVolume, 'from raw:', data.volume);
         }
         
         // 24시간 거래량으로 1분봉 볼륨을 추정하는 것은 잘못된 접근
@@ -1745,7 +1765,7 @@ async function loadCandles(interval) {
     }
     
     try {
-        console.log(`📥 Loading historical candles from database - interval: ${interval}, market: ${currentMarket}`);
+        console.log(`Loading historical candles from database - interval: ${interval}, market: ${currentMarket}`);
         const marketParam = currentMarket.replace('/', '-');
         
         // Determine count based on interval for optimal chart display
@@ -1817,7 +1837,7 @@ async function loadCandles(interval) {
                        low <= open && low <= close;
             })
             .map(candle => {
-                // 🚨 할머니 안전을 위한 강력한 타임스탬프 변환 (차트 로딩 시에도)
+                // 강력한 타임스탬프 변환 (차트 로딩 시에도)
                 let timeAsNumber;
                 const rawTime = candle.time;
                 
@@ -1839,7 +1859,7 @@ async function loadCandles(interval) {
                 }
                 
                 if (isNaN(timeAsNumber) || timeAsNumber <= 0) {
-                    console.warn('🚨 Invalid timestamp in chart data, using current time:', rawTime);
+                    console.warn('Invalid timestamp in chart data, using current time:', rawTime);
                     timeAsNumber = Math.floor(Date.now() / 1000);
                 }
                 
@@ -1906,8 +1926,8 @@ async function loadCandles(interval) {
                 // Store the sorted and validated candle data
                 candleData = safeCandles;
                 
-                console.log('📊 Historical data loaded from database, first candle:', safeCandles[0]);
-                console.log('📊 Historical data loaded from database, last candle:', safeCandles[safeCandles.length - 1]);
+                console.log('Historical data loaded from database, first candle:', safeCandles[0]);
+                console.log('Historical data loaded from database, last candle:', safeCandles[safeCandles.length - 1]);
                 
                 // Debug and fix timestamp conversion
                 const firstCandle = safeCandles[0];
@@ -1933,7 +1953,7 @@ async function loadCandles(interval) {
                     
                     // Force re-render chart with timezone
                     setTimeout(() => {
-                        console.log('🔄 Forcing chart timezone refresh...');
+                        console.log('Forcing chart timezone refresh...');
                         chart.timeScale().applyOptions({
                             timezone: userTimezone,
                             timeVisible: true,
@@ -2000,18 +2020,18 @@ async function loadCandles(interval) {
             })
             .filter(vol => vol && vol.time && Number.isFinite(vol.value) && vol.value >= 0);
         
-        console.log(`📊 Professional volume analysis: Avg=${avgVolume.toFixed(2)}, High volume bars=${volumeData.filter(v => v.isHighVolume).length}/${volumeData.length}`);
+        console.log(`Professional volume analysis: Avg=${avgVolume.toFixed(2)}, High volume bars=${volumeData.filter(v => v.isHighVolume).length}/${volumeData.length}`);
         
         if (volumeSeries && volumeData && volumeData.length > 0) {
             try {
-                console.log('📊 Setting volume data:', volumeData.length, 'points');
+                console.log('Setting volume data:', volumeData.length, 'points');
                 // Clear existing volume data first to avoid overlapping charts
                 volumeSeries.setData([]);
                 
                 // Set new volume data
                 volumeSeries.setData(volumeData);
                 volumeDataLoaded = true;
-                console.log('✅ Volume data loaded');
+                console.log('Volume data loaded');
             } catch (error) {
                 console.error('Error setting volume data:', error);
             }
@@ -2042,20 +2062,20 @@ async function loadCandles(interval) {
             loadChartSettings();
         }, 300);
         
-        console.log('✅ Historical candles loaded successfully from database');
+        console.log('Historical candles loaded successfully from database');
     } catch (error) {
         console.error('Failed to load candles:', error);
         showToast('Failed to load chart data', 'error');
     }
 }
 
-// 🚨 차트 데이터 복구 함수 (할머니 안전 보장)
+// 차트 데이터 복구 함수 (안전 보장)
 function repairChartData() {
     try {
-        console.log('🔧 Starting chart data repair...');
+        console.log('Starting chart data repair...');
         
         if (!candleData || candleData.length === 0) {
-            console.log('🔧 No candleData to repair');
+            console.log('No candleData to repair');
             return;
         }
         
@@ -2101,7 +2121,7 @@ function repairChartData() {
         // 차트 시리즈 데이터 완전 재설정
         if (candleSeries && repairedData.length > 0) {
             candleSeries.setData(repairedData);
-            console.log('🔧 Chart data repaired successfully');
+            console.log('Chart data repaired successfully');
         }
         
         // 볼륨 데이터도 재설정
@@ -2112,7 +2132,7 @@ function repairChartData() {
                 color: candle.close >= candle.open ? '#00d68f' : '#ff5a5f'
             }));
             volumeSeries.setData(volumeData);
-            console.log('🔧 Volume data repaired successfully');
+            console.log('Volume data repaired successfully');
         }
         
     } catch (error) {
@@ -2123,7 +2143,7 @@ function repairChartData() {
 // Update real-time candle data from WebSocket
 function updateRealtimeCandleData(newCandleData) {
     const funcTimestamp = new Date().toISOString().slice(11, 19);
-    console.log(`🚨 [${funcTimestamp}] updateRealtimeCandleData STARTED`, {
+    console.log(`[${funcTimestamp}] updateRealtimeCandleData STARTED`, {
         hasNewData: !!newCandleData,
         volume: newCandleData?.volume,
         close: newCandleData?.close,
@@ -2132,7 +2152,7 @@ function updateRealtimeCandleData(newCandleData) {
     
     try {
         if (!chartInitialized || !candleSeries || !chart || !candleData || candleData.length === 0) {
-            console.log(`❌ [${funcTimestamp}] Chart not ready for real-time updates:`, {
+            console.log(`[${funcTimestamp}] Chart not ready for real-time updates:`, {
                 chartInitialized,
                 hasCandleSeries: !!candleSeries,
                 hasChart: !!chart,
@@ -2183,8 +2203,8 @@ function updateRealtimeCandleData(newCandleData) {
             volume: parseFloat(newCandleData.volume) || 0
         };
         
-        console.log('⚡ Real-time candle update via WebSocket:', newCandle);
-        console.log('📊 Volume value:', newCandle.volume, typeof newCandle.volume);
+        console.log('Real-time candle update via WebSocket:', newCandle);
+        console.log('Volume value:', newCandle.volume, typeof newCandle.volume);
         console.log('🔍 volumeSeries status:', !!volumeSeries, typeof volumeSeries);
         console.log('🕐 Time values check:', {
             newTime: newCandle.time,
@@ -2325,10 +2345,10 @@ function updateRealtimeCandleData(newCandleData) {
                 
                 // 새 캔들인 경우와 기존 캔들 업데이트 구분
                 if (isNewCandle) {
-                    console.log('📊 Adding new candle to series');
+                    console.log('Adding new candle to series');
                     candleSeries.update(safeCandle);
                 } else {
-                    console.log('📊 Updating existing candle in series');
+                    console.log('Updating existing candle in series');
                     candleSeries.update(safeCandle);
                     
                     // 기존 캔들 업데이트 시 볼륨도 함께 업데이트
@@ -2339,11 +2359,11 @@ function updateRealtimeCandleData(newCandleData) {
                             value: newCandle.volume || 0,
                             color: isUp ? '#00d68f' : '#ff5a5f'
                         };
-                        console.log('📊 Updating volume for existing candle:', volumeData);
+                        console.log('Updating volume for existing candle:', volumeData);
                         volumeSeries.update(volumeData);
                     }
                 }
-                console.log('✅ Candle series updated successfully with safe data');
+                console.log('Candle series updated successfully with safe data');
             } catch (error) {
                 console.warn('⚠️ Could not update candle series:', error.message);
                 console.warn('⚠️ Problematic candle data:', newCandle);
@@ -2352,8 +2372,8 @@ function updateRealtimeCandleData(newCandleData) {
                 if (error.message.includes('Cannot update oldest data') || 
                     error.message.includes('time') ||
                     error.message.includes('object Object')) {
-                    console.log('🔧 CRITICAL: Attempting emergency chart data repair...');
-                    console.log('🔧 Error details:', {
+                    console.log('CRITICAL: Attempting emergency chart data repair...');
+                    console.log('Error details:', {
                         message: error.message,
                         candleTime: safeCandle.time,
                         candleTimeType: typeof safeCandle.time
@@ -2368,9 +2388,9 @@ function updateRealtimeCandleData(newCandleData) {
                             low: Number(safeCandle.low),
                             close: Number(safeCandle.close)
                         };
-                        console.log('🚨 Emergency candle conversion:', emergencyCandle);
+                        console.log('Emergency candle conversion:', emergencyCandle);
                         candleSeries.update(emergencyCandle);
-                        console.log('✅ Emergency update successful!');
+                        console.log('Emergency update successful!');
                     } catch (emergencyError) {
                         console.error('❌ Emergency update also failed:', emergencyError.message);
                         repairChartData();
@@ -2393,7 +2413,7 @@ function updateRealtimeCandleData(newCandleData) {
                             bottom: 0,
                         },
                     });
-                    console.log('✅ Volume series recreated');
+                    console.log('Volume series recreated');
                 } catch (e) {
                     console.error('Failed to recreate volume series:', e);
                 }
@@ -2447,7 +2467,7 @@ function updateRealtimeCandleData(newCandleData) {
                     });
                     
                     volumeSeries.update(volumeUpdate);
-                    console.log('✅ Professional volume updated successfully');
+                    console.log('Professional volume updated successfully');
                 } catch (e) {
                     console.error('❌ Failed to update volume:', e);
                 }
@@ -2465,7 +2485,7 @@ function updateRealtimeCandleData(newCandleData) {
                     // 🚨 ULTIMATE FIX: Always use update() for line chart
                     console.log('🛡️ Using SAFE update method for line chart');
                     lineSeries.update(lineData);
-                    console.log('✅ Line chart updated successfully');
+                    console.log('Line chart updated successfully');
                 } catch (e) {
                     console.error('❌ Failed to update line chart:', e);
                 }
@@ -2476,7 +2496,7 @@ function updateRealtimeCandleData(newCandleData) {
             
             // Force update the most recent candle if volume is significantly different
             if (lastStoredCandle && Math.abs(newCandle.volume - lastStoredCandle.volume) > 0.01) {
-                console.log(`🔄 Force updating volume due to significant change: ${lastStoredCandle.volume} → ${newCandle.volume}`);
+                console.log(`Force updating volume due to significant change: ${lastStoredCandle.volume} -> ${newCandle.volume}`);
                 
                 // Update the volume of the most recent candle with professional logic
                 if (volumeSeries) {
@@ -2505,7 +2525,7 @@ function updateRealtimeCandleData(newCandleData) {
                     
                     try {
                         volumeSeries.update(volumeUpdate);
-                        console.log('✅ Professional force volume update successful:', volumeUpdate.value);
+                        console.log('Professional force volume update successful:', volumeUpdate.value);
                     } catch (e) {
                         console.error('❌ Force volume update failed:', e);
                     }
@@ -2518,7 +2538,7 @@ function updateRealtimeCandleData(newCandleData) {
         // Update current price
         currentPrice = newCandle.close;
         
-        console.log(`✅ [${funcTimestamp}] updateRealtimeCandleData COMPLETED successfully`);
+        console.log(`[${funcTimestamp}] updateRealtimeCandleData COMPLETED successfully`);
         
     } catch (error) {
         console.error(`❌ [${funcTimestamp}] Error updating real-time candle:`, error);
@@ -2545,7 +2565,7 @@ function updateVolumeFromOneMinute(oneMinuteData) {
             color: isUp ? '#00d68f' : '#ff5a5f'
         };
         
-        console.log('📊 Updating volume from 1m data:', {
+        console.log('Updating volume from 1m data:', {
             time: lastCandle.time,
             volume: volumeValue,
             currentInterval
@@ -2649,7 +2669,7 @@ function updateRealtimeCandle(price) {
             return; // Exit early as we created a new candle
         }
         
-        console.log('🔄 Updating existing candle with time:', lastCandle.time, 'Current price:', price);
+        console.log('Updating existing candle with time:', lastCandle.time, 'Current price:', price);
         
         // Validate all required candle properties
         if (!lastCandle.time) {
@@ -2750,7 +2770,7 @@ function alignTimeToInterval(timestamp, interval) {
 // Switch timeframe
 function switchTimeframe(interval) {
     try {
-        console.log('🔄 Updating existing candle with time:', candleTime, 'Current price:', price);
+        console.log('Updating existing candle with time:', candleTime, 'Current price:', price);
         
         // Validate all required candle properties
         if (!lastCandle.time) {
@@ -3625,11 +3645,25 @@ function openLeveragePosition() {
     document.getElementById('position-size').value = '';
 }
 
-// Close leverage position
-function closeLeveragePosition(positionId, percentage = 100) {
-    const positionIndex = leveragePositions.findIndex(p => p.id === positionId);
+// Close leverage position with race condition protection
+async function closeLeveragePosition(positionId, percentage = 100) {
+    // Check if position is already being processed
+    const lockKey = `position_${positionId}`;
+    if (positionLocks.has(lockKey)) {
+        console.warn(`Position ${positionId} is already being processed`);
+        return;
+    }
     
-    if (positionIndex === -1) return;
+    // Acquire lock
+    positionLocks.set(lockKey, Date.now());
+    
+    try {
+        const positionIndex = leveragePositions.findIndex(p => p.id === positionId);
+        
+        if (positionIndex === -1) {
+            console.warn(`Position ${positionId} not found`);
+            return;
+        }
     
     const position = leveragePositions[positionIndex];
     const closeRatio = percentage / 100;
@@ -3720,21 +3754,25 @@ function closeLeveragePosition(positionId, percentage = 100) {
     // Save user data
     saveUserData();
     
-    const statusText = percentage === 100 ? 'Full Close' : `${percentage}% Close`;
-    const safeFinalPnl = Number.isFinite(finalPnl) ? finalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
-    const safeTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
-    showToast(`Position ${statusText} - P&L: $${safeFinalPnl} (Fees: $${safeTotalFees})`, finalPnl >= 0 ? 'success' : 'error');
-    
-    // Play close position sound (profit = sell sound, loss = different sound)
-    if (finalPnl >= 0) {
-        playTradingSound('sell'); // Profit - use sell sound
-    } else {
-        playTradingSound('loss'); // Loss - use special loss sound
+        const statusText = percentage === 100 ? 'Full Close' : `${percentage}% Close`;
+        const safeFinalPnl = Number.isFinite(finalPnl) ? finalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        const safeTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
+        showToast(`Position ${statusText} - P&L: $${safeFinalPnl} (Fees: $${safeTotalFees})`, finalPnl >= 0 ? 'success' : 'error');
+        
+        // Play close position sound (profit = sell sound, loss = different sound)
+        if (finalPnl >= 0) {
+            playTradingSound('sell'); // Profit - use sell sound
+        } else {
+            playTradingSound('loss'); // Loss - use special loss sound
+        }
+    } finally {
+        // Always release lock
+        positionLocks.delete(lockKey);
     }
 }
 
-// Close all leverage positions
-function closeAllPositions() {
+// Close all leverage positions with race condition protection
+async function closeAllPositions() {
     if (leveragePositions.length === 0) {
         showToast('No positions to close', 'info');
         return;
@@ -3749,38 +3787,18 @@ function closeAllPositions() {
     let totalPnl = 0;
     let totalFees = 0;
     
-    // Close all positions (we need to work backwards since we're removing from array)
-    for (let i = leveragePositions.length - 1; i >= 0; i--) {
-        const position = leveragePositions[i];
-        const positionId = position.id;
-        
-        // Calculate P&L before closing (same logic as closeLeveragePosition)
-        const positionMarket = position.market || currentMarket;
-        const positionPrice = marketPrices[positionMarket] || currentPrice;
-        const priceChange = positionPrice - position.entryPrice;
-        const pnlMultiplier = position.type === 'long' ? 1 : -1;
-        const rawPnl = (priceChange / position.entryPrice) * position.size * pnlMultiplier;
-        
-        // Calculate fees
-        const closingFee = position.size * getTradingFee('taker');
-        const positionTotalFees = position.openingFee + closingFee;
-        const finalPnl = rawPnl - positionTotalFees;
-        
-        totalPnl += finalPnl;
-        totalFees += positionTotalFees;
-        
-        // Close the position (100%)
-        closeLeveragePosition(positionId, 100);
+    // Close all positions sequentially to prevent race conditions
+    const positionsToClose = [...leveragePositions]; // Create a copy
+    
+    for (const position of positionsToClose) {
+        try {
+            await closeLeveragePosition(position.id, 100);
+        } catch (error) {
+            console.error(`Error closing position ${position.id}:`, error);
+        }
     }
     
-    // Show summary toast
-    const safeTotalPnl = Number.isFinite(totalPnl) ? totalPnl.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
-    const safeTotalFees = Number.isFinite(totalFees) ? totalFees.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
-    
-    showToast(
-        `Closed ${positionCount} position(s) - Total P&L: $${safeTotalPnl} (Fees: $${safeTotalFees})`, 
-        totalPnl >= 0 ? 'success' : 'error'
-    );
+    showToast(`Closed ${positionCount} position(s)`, 'success');
 }
 
 // Toggle close dropdown menu
@@ -3912,7 +3930,7 @@ function forceLiquidation(position) {
     const positionMarket = position.market || currentMarket;
     const positionPrice = marketPrices[positionMarket] || currentPrice;
     
-    console.log(`🚨 LIQUIDATION: ${position.type} ${position.leverage}x position at $${positionPrice} (${positionMarket})`);
+    console.log(`LIQUIDATION: ${position.type} ${position.leverage}x position at $${positionPrice} (${positionMarket})`);
     
     // Calculate total loss (entire margin + any additional loss)
     const totalLoss = -position.margin;
@@ -5838,7 +5856,7 @@ function redrawExistingDrawings() {
 async function saveChartSettings() {
     const token = localStorage.getItem('token');
     if (!token) {
-        console.log('❌ No token found, skipping save');
+        console.log('No token found, skipping save');
         return;
     }
     console.log('💾 Saving chart settings for', currentMarket);
@@ -5891,10 +5909,10 @@ async function saveChartSettings() {
 async function loadChartSettings() {
     const token = localStorage.getItem('token');
     if (!token) {
-        console.log('❌ No token found, skipping load');
+        console.log('No token found, skipping load');
         return;
     }
-    console.log('📥 Loading chart settings for', currentMarket);
+    console.log('Loading chart settings for', currentMarket);
 
     try {
         const response = await fetch(`/api/chart/settings/${encodeURIComponent(currentMarket)}`, {
@@ -5907,7 +5925,7 @@ async function loadChartSettings() {
         
         if (response.ok) {
             const data = await response.json();
-            console.log('📊 Loaded data:', data);
+            console.log('Loaded data:', data);
             if (data.settings) {
                 const settings = data.settings;
                 console.log('Settings found:', settings);
@@ -5951,12 +5969,12 @@ async function loadChartSettings() {
                     }
                 }
                 
-                console.log('✅ Chart settings loaded successfully');
+                console.log('Chart settings loaded successfully');
             } else {
-                console.log('📊 No settings found in response');
+                console.log('No settings found in response');
             }
         } else if (response.status === 404) {
-            console.log('📊 No saved settings found for', currentMarket);
+            console.log('No saved settings found for', currentMarket);
         } else {
             console.error('Failed to load chart settings:', response.status);
         }
