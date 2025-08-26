@@ -1,5 +1,7 @@
 require('dotenv').config();
 const express = require('express');
+const swaggerJSDoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
 const cors = require('cors');
 const axios = require('axios');
 const WebSocket = require('ws');
@@ -14,7 +16,7 @@ const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
 const AlertManager = require('./monitoring/alert-manager');
 const logger = require('./utils/logger');
-const swaggerConfig = require('./config/swagger');
+const swaggerConfig = require('./config/swagger-config');
 
 // Standard API response utility
 const createAPIResponse = {
@@ -83,61 +85,83 @@ const authLimiter = rateLimit({
 });
 
 // Security middleware
+// CSP configuration with route-specific overrides
+const defaultCSP = {
+    directives: {
+        defaultSrc: ["'self'"],
+        // Allow specific style sources (removing unsafe-inline for better security)
+        styleSrc: [
+            "'self'", 
+            "https://fonts.googleapis.com", 
+            "https://cdnjs.cloudflare.com",
+            "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='", // Empty inline styles
+            "'sha256-5o/xXiuiuwpezmuqlP2nTVguD0j4V0nkPsBTti+gmLQ='", // style="display:none"
+            "'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='", // style=""
+            "'sha256-nlJqzRTYboExZzVD4DQxb+uOHpm0xUODsM+51NcB0tM='", // Dynamic styles
+            "'sha256-UQd05PVutI5yWvpzVBsXVcrIZqvqRxJdE5AbYcL/rHA='", // Script-generated styles
+            "'sha256-B04insvtmrN/tMV1Tl3SutYG3CpN7z2ZoZnPym8Ebz8='", // history.js and settings.js styles
+            "'sha256-Q43oAi1FsW2BRoOHMdVoonS7w3dKu7LpOXFyqw8vcLo='", // Additional dynamic styles
+            "'unsafe-hashes'", // Allow event handler styles
+            process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
+        ].filter(Boolean),
+        // Restrict script sources and remove unsafe-eval
+        scriptSrc: [
+            "'self'", 
+            "https://unpkg.com", 
+            "https://cdn.jsdelivr.net",
+            "'sha256-9qIM/K9N6AqC1F+pyJsf+6EiujBTaKud/UephdAW7H4='", // Inline script hash
+            process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
+        ].filter(Boolean),
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:", "https://cdnjs.cloudflare.com"],
+        // Restrict image sources to specific domains
+        imgSrc: [
+            "'self'", 
+            "data:", 
+            "https://s2.coinmarketcap.com", // For crypto icons
+            "https://www.okx.com",
+            "blob:"
+        ],
+        // Restrict connection sources to necessary domains
+        connectSrc: [
+            "'self'", 
+            "ws://localhost:*", 
+            "wss://localhost:*",
+            "https://www.okx.com", 
+            "wss://ws.okx.com",
+            "https://api.upbit.com"
+        ],
+        objectSrc: ["'none'"], // Prevent object/embed/applet
+        baseUri: ["'self'"], // Prevent base tag injection
+        formAction: ["'self'"], // Restrict form submissions
+    }
+};
+
+// Swagger UI-specific CSP
+const swaggerCSP = {
+    directives: {
+        ...defaultCSP.directives,
+        styleSrc: [
+            "'self'", 
+            "https://fonts.googleapis.com", 
+            "https://cdnjs.cloudflare.com",
+            "'unsafe-inline'" // Swagger UI requires inline styles
+        ],
+        scriptSrc: [
+            "'self'", 
+            "https://unpkg.com", 
+            "https://cdn.jsdelivr.net",
+            "'unsafe-inline'" // Swagger UI requires inline scripts
+        ]
+    }
+};
+
 app.use(helmet({
     // Explicit security headers for better protection
     frameguard: { action: 'deny' }, // X-Frame-Options: DENY
     noSniff: true, // X-Content-Type-Options: nosniff
     xssFilter: { mode: 'block' }, // X-XSS-Protection: 1; mode=block
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            // Allow specific style sources (removing unsafe-inline for better security)
-            styleSrc: [
-                "'self'", 
-                "https://fonts.googleapis.com", 
-                "https://cdnjs.cloudflare.com",
-                "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='", // Empty inline styles
-                "'sha256-5o/xXiuiuwpezmuqlP2nTVguD0j4V0nkPsBTti+gmLQ='", // style="display:none"
-                "'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='", // style=""
-                "'sha256-nlJqzRTYboExZzVD4DQxb+uOHpm0xUODsM+51NcB0tM='", // Dynamic styles
-                "'sha256-UQd05PVutI5yWvpzVBsXVcrIZqvqRxJdE5AbYcL/rHA='", // Script-generated styles
-                "'sha256-B04insvtmrN/tMV1Tl3SutYG3CpN7z2ZoZnPym8Ebz8='", // history.js and settings.js styles
-                "'sha256-Q43oAi1FsW2BRoOHMdVoonS7w3dKu7LpOXFyqw8vcLo='", // Additional dynamic styles
-                "'unsafe-hashes'", // Allow event handler styles
-                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
-            ].filter(Boolean),
-            // Restrict script sources and remove unsafe-eval
-            scriptSrc: [
-                "'self'", 
-                "https://unpkg.com", 
-                "https://cdn.jsdelivr.net",
-                "'sha256-9qIM/K9N6AqC1F+pyJsf+6EiujBTaKud/UephdAW7H4='", // Inline script hash
-                process.env.NODE_ENV === 'development' ? "'unsafe-inline'" : null
-            ].filter(Boolean),
-            fontSrc: ["'self'", "https://fonts.gstatic.com", "data:", "https://cdnjs.cloudflare.com"],
-            // Restrict image sources to specific domains
-            imgSrc: [
-                "'self'", 
-                "data:", 
-                "https://s2.coinmarketcap.com", // For crypto icons
-                "https://www.okx.com",
-                "blob:"
-            ],
-            // Restrict connection sources to necessary domains
-            connectSrc: [
-                "'self'", 
-                "ws://localhost:*", 
-                "wss://localhost:*",
-                "https://www.okx.com", 
-                "wss://ws.okx.com",
-                "https://api.upbit.com"
-            ],
-            objectSrc: ["'none'"], // Prevent object/embed/applet
-            baseUri: ["'self'"], // Prevent base tag injection
-            formAction: ["'self'"], // Restrict form submissions
-        },
-    },
+    contentSecurityPolicy: defaultCSP
 }));
 
 // Enhanced CORS configuration with strict security
@@ -183,11 +207,23 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static('public'));
 
+// Swagger documentation with relaxed CSP
+const swaggerSpec = swaggerJSDoc(swaggerConfig);
+app.use('/api-docs', 
+    helmet({
+        contentSecurityPolicy: swaggerCSP,
+        frameguard: { action: 'deny' },
+        noSniff: true,
+        xssFilter: { mode: 'block' },
+        referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+    }),
+    swaggerUi.serve, 
+    swaggerUi.setup(swaggerSpec)
+);
+
 // Apply rate limiting to API routes
 app.use('/api/', limiter);
 
-// API Documentation
-app.use('/api-docs', swaggerConfig.serve, swaggerConfig.setup);
 
 // Logging middleware
 app.use((req, res, next) => {
@@ -846,7 +882,31 @@ app.get('/404.html', (req, res) => {
  *                   low_price: 44000
  *                   volume: 1500000
  */
-// Get all market prices
+/**
+ * @swagger
+ * /api/markets:
+ *   get:
+ *     summary: Get all market prices
+ *     description: Retrieve current prices for all supported cryptocurrency markets
+ *     tags: [Markets]
+ *     responses:
+ *       200:
+ *         description: Market prices retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/APIResponse'
+ *             example:
+ *               success: true
+ *               data:
+ *                 BTC-USDT:
+ *                   price: 45000.00
+ *                   change: 0.025
+ *                   volume: 1500000
+ *                   high_price: 46000
+ *                   low_price: 44000
+ *               message: "Market prices retrieved successfully"
+ */
 app.get('/api/markets', (req, res) => {
     res.json(createAPIResponse.success(marketPrices, 'Market prices retrieved successfully'));
 });
@@ -912,7 +972,50 @@ app.get('/api/orderbook/:market?', async (req, res) => {
     }
 });
 
-// Get candle data (from database first, fallback to API)
+/**
+ * @swagger
+ * /api/candles/{interval}:
+ *   get:
+ *     summary: Get historical candle data
+ *     description: Retrieve candlestick data for chart visualization
+ *     tags: [Markets]
+ *     parameters:
+ *       - in: path
+ *         name: interval
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d]
+ *         description: Candle interval
+ *       - in: query
+ *         name: market
+ *         schema:
+ *           type: string
+ *           default: BTC-USDT
+ *         description: Trading pair
+ *       - in: query
+ *         name: count
+ *         schema:
+ *           type: integer
+ *           default: 2000
+ *         description: Number of candles to retrieve
+ *     responses:
+ *       200:
+ *         description: Candle data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/APIResponse'
+ *             example:
+ *               success: true
+ *               data:
+ *                 - time: 1640995200
+ *                   open: 45000.00
+ *                   high: 45500.00
+ *                   low: 44800.00
+ *                   close: 45200.00
+ *                   volume: 125.5
+ */
 app.get('/api/candles/:interval', async (req, res) => {
     try {
         const { interval } = req.params;
