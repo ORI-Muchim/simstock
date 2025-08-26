@@ -393,6 +393,9 @@ function updateMarketCard(instId, data) {
 function selectMarket(market) {
     currentMarket = market;
     
+    // Calculate profit/loss for all cryptos
+    const spotProfits = calculateSpotProfitLoss();
+    
     // Update UI for selected market
     const [crypto, base] = market.split('/');
     const marketBtn = document.querySelector('.market-select-btn');
@@ -1941,6 +1944,10 @@ async function loadCandles(interval) {
                 }
                 
                 try {
+                    // Clear existing candle data first to avoid overlapping charts
+                    candleSeries.setData([]);
+                    
+                    // Set new candle data
                     candleSeries.setData(safeCandles);
                     // Reapply timezone after data is loaded
                     setTimeout(() => {
@@ -1998,6 +2005,10 @@ async function loadCandles(interval) {
         if (volumeSeries && volumeData && volumeData.length > 0) {
             try {
                 console.log('📊 Setting volume data:', volumeData.length, 'points');
+                // Clear existing volume data first to avoid overlapping charts
+                volumeSeries.setData([]);
+                
+                // Set new volume data
                 volumeSeries.setData(volumeData);
                 volumeDataLoaded = true;
                 console.log('✅ Volume data loaded');
