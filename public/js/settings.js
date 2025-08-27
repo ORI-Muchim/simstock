@@ -372,15 +372,18 @@ function setupSettingsPage() {
     // Reset account data
     resetAccountBtn.addEventListener('click', () => {
         resetModal.style.display = 'block';
+        setTimeout(() => resetModal.classList.add('show'), 10);
     });
 
     // Close reset modal
     closeResetModal.addEventListener('click', () => {
-        resetModal.style.display = 'none';
+        resetModal.classList.remove('show');
+        setTimeout(() => resetModal.style.display = 'none', 300);
     });
 
     cancelResetBtn.addEventListener('click', () => {
-        resetModal.style.display = 'none';
+        resetModal.classList.remove('show');
+        setTimeout(() => resetModal.style.display = 'none', 300);
     });
 
     // Confirm reset
@@ -398,7 +401,8 @@ function setupSettingsPage() {
         updateUI();
         
         // Close modal
-        resetModal.style.display = 'none';
+        resetModal.classList.remove('show');
+        setTimeout(() => resetModal.style.display = 'none', 300);
         
         showToast('Account data has been reset', 'success');
     });
@@ -406,7 +410,8 @@ function setupSettingsPage() {
     // Close modal when clicking outside
     resetModal.addEventListener('click', (e) => {
         if (e.target === resetModal) {
-            resetModal.style.display = 'none';
+            resetModal.classList.remove('show');
+            setTimeout(() => resetModal.style.display = 'none', 300);
         }
     });
 

@@ -11,6 +11,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
+const { validationRules, sanitizers } = require('./middleware/validation');
 const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings, saveChatMessage, getChatHistory } = require('./database');
 const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
@@ -1232,24 +1233,10 @@ const authenticateToken = (req, res, next) => {
 // User registration with validation
 app.post('/api/register', 
     authLimiter,
-    [
-        body('username')
-            .isLength({ min: 3, max: 20 })
-            .withMessage('Username must be between 3 and 20 characters')
-            .matches(/^[a-zA-Z0-9_]+$/)
-            .withMessage('Username can only contain letters, numbers, and underscores'),
-        body('password')
-            .isLength({ min: 4 })
-            .withMessage('Password must be at least 4 characters long')
-    ],
+    ...validationRules.register,
     async (req, res) => {
         try {
-            // Check validation errors
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json(createAPIResponse.error('Validation failed', errors.array(), 400));
-            }
-            
+            // Validation is handled by middleware
             const { username, password } = req.body;
             
             const userId = await createUser(username, password);
@@ -1309,18 +1296,10 @@ app.post('/api/register',
 // User login with validation
 app.post('/api/login',
     authLimiter,
-    [
-        body('username').notEmpty().withMessage('Please enter your username'),
-        body('password').notEmpty().withMessage('Please enter your password')
-    ],
+    ...validationRules.login,
     async (req, res) => {
         try {
-            // Check validation errors
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json(createAPIResponse.error('Validation failed', errors.array(), 400));
-            }
-            
+            // Validation is handled by middleware
             const { username, password } = req.body;
             
             const user = await authenticateUser(username, password);
@@ -1519,15 +1498,45 @@ app.delete('/api/chart/settings/:market', authenticateToken, async (req, res) =>
     }
 });
 
-// Handle WebSocket upgrade for chat
+// Helper function to verify JWT from WebSocket request
+function verifyWebSocketAuth(request) {
+    try {
+        // Extract token from query string or authorization header
+        const url = new URL(request.url, `http://${request.headers.host}`);
+        const token = url.searchParams.get('token') || 
+                     request.headers.authorization?.replace('Bearer ', '');
+        
+        if (!token) {
+            return null;
+        }
+        
+        const decoded = jwt.verify(token, JWT_SECRET);
+        return decoded;
+    } catch (error) {
+        logger.warn('WebSocket authentication failed', { error: error.message });
+        return null;
+    }
+}
+
+// Handle WebSocket upgrade with authentication
 server.on('upgrade', (request, socket, head) => {
-    const pathname = request.url;
+    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
     
+    // Verify authentication for protected WebSocket endpoints
     if (pathname === '/chat') {
+        const auth = verifyWebSocketAuth(request);
+        if (!auth) {
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+        }
+        
         chatWss.handleUpgrade(request, socket, head, (ws) => {
+            ws.auth = auth; // Attach auth info to WebSocket
             chatWss.emit('connection', ws, request);
         });
     } else {
+        // Market data WebSocket (public, but can add rate limiting)
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
         });
@@ -1536,50 +1545,51 @@ server.on('upgrade', (request, socket, head) => {
 
 // Chat WebSocket connection handler
 chatWss.on('connection', (ws) => {
-    let userId = null;
-    let username = null;
-    let isAuthenticated = false;
+    // Authentication already verified in upgrade handler
+    const userId = ws.auth?.userId;
+    const username = ws.auth?.username;
+    const isAuthenticated = true;
+    
+    // Store client immediately
+    if (userId && username) {
+        chatClients.set(ws, { userId, username });
+        logger.info('Chat WebSocket client connected', { userId, username });
+    }
     
     ws.on('message', async (message) => {
         try {
             const data = JSON.parse(message);
             
             if (data.type === 'auth') {
-                // Authenticate user with JWT token
-                try {
-                    const decoded = jwt.verify(data.token, JWT_SECRET);
-                    userId = decoded.userId;
-                    username = data.username || decoded.username;
-                    isAuthenticated = true;
-                    
-                    // Store client
-                    chatClients.set(ws, { userId, username });
-                    
-                    // Send chat history
-                    const history = await getChatHistory(50);
-                    ws.send(JSON.stringify({
-                        type: 'history',
-                        messages: history.map(msg => ({
-                            ...msg,
-                            timestamp: msg.created_at,
-                            // Ensure metadata is parsed if it's a string
-                            metadata: typeof msg.metadata === 'string' ? 
-                                JSON.parse(msg.metadata) : msg.metadata
-                        }))
-                    }));
-                    
-                    // Send online count
-                    broadcastOnlineCount();
-                    
-                    // Notify others that user joined
-                    broadcastSystemMessage(`${username} joined the chat`);
-                    
-                } catch (error) {
-                    ws.send(JSON.stringify({
-                        type: 'error',
-                        message: 'Authentication failed'
-                    }));
-                    ws.close();
+                // Auth already handled in upgrade, send success response
+                if (ws.auth) {
+                    try {
+                        // Send chat history
+                        const history = await getChatHistory(50);
+                        ws.send(JSON.stringify({
+                            type: 'history',
+                            messages: history.map(msg => ({
+                                ...msg,
+                                timestamp: msg.created_at,
+                                // Ensure metadata is parsed if it's a string
+                                metadata: typeof msg.metadata === 'string' ? 
+                                    JSON.parse(msg.metadata) : msg.metadata
+                            }))
+                        }));
+                        
+                        // Send online count
+                        broadcastOnlineCount();
+                        
+                        // Notify others that user joined
+                        broadcastSystemMessage(`${username} joined the chat`);
+                        
+                    } catch (error) {
+                        ws.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to load chat history'
+                        }));
+                        logger.error('Chat history error', { error: error.message });
+                    }
                 }
             } else if (isAuthenticated) {
                 // Handle authenticated messages

@@ -25,9 +25,29 @@ let marketPrices = {
     'SOL/USDT': 0,
     'XRP/USDT': 0
 };
+// Memory management - limit array sizes
+const MAX_TRANSACTIONS = 1000;
+const MAX_POSITIONS = 100;
+const MAX_PENDING_ORDERS = 50;
+
 let transactions = [];
 let leveragePositions = [];
 let pendingOrders = []; // Array to store limit orders
+
+// Helper function to manage array size
+function limitArraySize(array, maxSize) {
+    while (array.length > maxSize) {
+        array.shift(); // Remove oldest items
+    }
+}
+
+// Helper function to add transaction with size limit
+function addTransactionWithLimit(transaction) {
+    addTransactionWithLimit(transaction);
+    limitArraySize(transactions, MAX_TRANSACTIONS);
+    // Update cache if needed
+    transactionCache.delete('all'); // Clear cache when new transaction added
+}
 let userTimezone = 'UTC'; // Default timezone
 let chart = null;
 let candleSeries = null;
@@ -3242,7 +3262,7 @@ function executeBuy() {
         fee: fee,
         time: new Date().toISOString()
     };
-    transactions.push(transaction);
+    addTransactionWithLimit(transaction);
     
     // Update average price line
     updateAveragePriceLine();
@@ -3400,7 +3420,7 @@ function executeLimitOrder(order) {
             fee: order.fee,
             time: new Date().toISOString()
         };
-        transactions.push(transaction);
+        addTransactionWithLimit(transaction);
         addTransactionToHistory(transaction);
         
     } else {
@@ -3417,7 +3437,7 @@ function executeLimitOrder(order) {
             fee: order.fee,
             time: new Date().toISOString()
         };
-        transactions.push(transaction);
+        addTransactionWithLimit(transaction);
         addTransactionToHistory(transaction);
     }
     
@@ -3537,7 +3557,7 @@ function executeSell() {
         fee: fee,
         time: new Date().toISOString()
     };
-    transactions.push(transaction);
+    addTransactionWithLimit(transaction);
     
     // Update average price line
     updateAveragePriceLine();
@@ -3656,6 +3676,12 @@ function openLeveragePosition() {
             time: new Date().toISOString()
         };
         
+        // Check max positions limit
+        if (leveragePositions.length >= MAX_POSITIONS) {
+            showToast(`Maximum positions limit (${MAX_POSITIONS}) reached`, 'error');
+            return;
+        }
+        
         leveragePositions.push(position);
         showToast(`🚀 ${positionType.toUpperCase()} position opened: $${positionSize.toFixed(2)} (${leverage}x)`, 'success');
         
@@ -3672,9 +3698,15 @@ function openLeveragePosition() {
     // Save user data
     saveUserData();
     
-    // Clear input
+    // Clear input and reset fee display
     document.getElementById('leverage-amount').value = '';
     document.getElementById('position-size').value = '';
+    
+    // Reset fee info display
+    const feeInfoElement = document.getElementById('leverage-fee-info');
+    if (feeInfoElement) {
+        feeInfoElement.textContent = 'Fees: 0.050% each way (Taker)';
+    }
 }
 
 // Close leverage position with race condition protection
@@ -3757,7 +3789,7 @@ async function closeLeveragePosition(positionId, percentage = 100) {
         percentage: percentage,
         time: new Date().toISOString()
     };
-    transactions.push(transaction);
+    addTransactionWithLimit(transaction);
     
     if (percentage === 100) {
         // Close entire position
@@ -3927,7 +3959,15 @@ function updateLeveragePositions() {
     });
 }
 
-// Calculate liquidation price for a position
+/**
+ * Calculate liquidation price for a leverage position
+ * @param {Object} position - The position object
+ * @param {number} position.entryPrice - Entry price of the position
+ * @param {number} position.leverage - Leverage multiplier (e.g., 10 for 10x)
+ * @param {string} position.type - Position type ('long' or 'short')
+ * @param {number} [position.tradingFeeRate] - Custom trading fee rate
+ * @returns {number} The liquidation price
+ */
 function calculateLiquidationPrice(position) {
     const maintenanceMarginRate = 0.005; // 0.5% maintenance margin
     const feeRate = position.tradingFeeRate || getTradingFee('taker');
@@ -4394,7 +4434,14 @@ function cleanupAll() {
 window.addEventListener('beforeunload', cleanupAll);
 window.addEventListener('unload', cleanupAll);
 
-// Calculate spot profit/loss for each cryptocurrency (optimized with caching)
+/**
+ * Calculate spot profit/loss for each cryptocurrency (optimized with caching)
+ * @returns {Object} Object containing profit/loss data for each crypto
+ * @returns {Object} returns.{crypto}.totalInvested - Total amount invested in USD
+ * @returns {Object} returns.{crypto}.currentValue - Current value in USD
+ * @returns {Object} returns.{crypto}.profitLoss - Profit or loss in USD
+ * @returns {Object} returns.{crypto}.profitLossPercent - Profit or loss percentage
+ */
 function calculateSpotProfitLoss() {
     const spotProfits = {};
     
@@ -4973,7 +5020,14 @@ function removeIndicator(indicator) {
     // Note: Saving is handled at the button click level
 }
 
-// Calculate Simple Moving Average
+/**
+ * Calculate Simple Moving Average
+ * @param {Array<Object>} data - Array of candle data objects
+ * @param {Object} data[].close - Close price for each candle
+ * @param {number} data[].time - Timestamp for each candle
+ * @param {number} [period=20] - Number of periods for the moving average
+ * @returns {Array<Object>} Array of SMA data points with time and value
+ */
 function calculateSMA(data, period = 20) {
     const sma = [];
     for (let i = period - 1; i < data.length; i++) {
@@ -4989,7 +5043,14 @@ function calculateSMA(data, period = 20) {
     return sma;
 }
 
-// Calculate Exponential Moving Average
+/**
+ * Calculate Exponential Moving Average
+ * @param {Array<Object>} data - Array of candle data objects
+ * @param {number} data[].close - Close price for each candle
+ * @param {number} data[].time - Timestamp for each candle
+ * @param {number} [period=20] - Number of periods for the moving average
+ * @returns {Array<Object>} Array of EMA data points with time and value
+ */
 function calculateEMA(data, period = 20) {
     const ema = [];
     const multiplier = 2 / (period + 1);

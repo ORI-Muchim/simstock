@@ -1,6 +1,7 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const Decimal = require('decimal.js');
+const logger = require('./utils/logger');
 
 // Configure Decimal.js for financial precision
 Decimal.config({ precision: 28, rounding: 4 });
@@ -17,17 +18,27 @@ const pool = new Pool({
     connectionTimeoutMillis: 2000,
 });
 
-// Test database connection
-pool.connect((err, client, release) => {
-    if (err) {
-        console.error('Error acquiring client:', err.stack);
-        return;
+// Test database connection with async/await
+(async () => {
+    try {
+        const client = await pool.connect();
+        logger.info('Connected to PostgreSQL database');
+        client.release();
+    } catch (err) {
+        logger.error('Error acquiring database client', { 
+            error: err.message, 
+            stack: err.stack 
+        });
     }
-    console.log('Connected to PostgreSQL database');
-    release();
-});
+})();
 
-// User functions
+/**
+ * Create a new user in the database
+ * @param {string} username - The username (3-20 characters, alphanumeric)
+ * @param {string} password - The plain text password (min 6 characters)
+ * @returns {Promise<number>} The created user ID
+ * @throws {Error} If user creation fails or username exists
+ */
 const createUser = async (username, password) => {
     const client = await pool.connect();
     
@@ -62,6 +73,15 @@ const createUser = async (username, password) => {
     }
 };
 
+/**
+ * Authenticate a user with username and password
+ * @param {string} username - The username to authenticate
+ * @param {string} password - The plain text password
+ * @returns {Promise<Object|null>} User object if authentication succeeds, null otherwise
+ * @returns {Promise<Object>} returns.id - User ID
+ * @returns {Promise<Object>} returns.username - Username
+ * @returns {Promise<Object>} returns.created_at - Account creation timestamp
+ */
 const authenticateUser = async (username, password) => {
     try {
         const result = await pool.query(
@@ -82,6 +102,16 @@ const authenticateUser = async (username, password) => {
     }
 };
 
+/**
+ * Get user data including balances and trading history
+ * @param {number} userId - The user ID
+ * @returns {Promise<Object|null>} User data object or null if not found
+ * @returns {Promise<Object>} returns.usd_balance - USD balance as number
+ * @returns {Promise<Object>} returns.btc_balance - BTC balance as number
+ * @returns {Promise<Object>} returns.transactions - Array of transaction objects
+ * @returns {Promise<Object>} returns.leverage_positions - Array of position objects
+ * @returns {Promise<Object>} returns.timezone - User timezone string
+ */
 const getUserData = async (userId) => {
     try {
         const result = await pool.query(`
@@ -327,7 +357,7 @@ const saveChatMessage = async (userId, username, message, messageType = 'message
         
         return result.rows[0];
     } catch (error) {
-        console.error('Error saving chat message:', error);
+        logger.error('Error saving chat message', { userId, username, error: error.message });
         throw error;
     }
 };
@@ -343,7 +373,7 @@ const getChatHistory = async (limit = 50) => {
         
         return result.rows.reverse(); // Reverse to get chronological order
     } catch (error) {
-        console.error('Error getting chat history:', error);
+        logger.error('Error getting chat history', { limit, error: error.message });
         throw error;
     }
 };
@@ -358,7 +388,7 @@ const deleteChatMessage = async (messageId, userId) => {
         
         return result.rowCount > 0;
     } catch (error) {
-        console.error('Error deleting chat message:', error);
+        logger.error('Error deleting chat message', { messageId, userId, error: error.message });
         throw error;
     }
 };
@@ -385,9 +415,9 @@ const initializeChatTable = async () => {
             ON chat_messages(created_at DESC)
         `);
         
-        console.log('Chat messages table initialized');
+        logger.info('Chat messages table initialized');
     } catch (error) {
-        console.error('Error initializing chat table:', error);
+        logger.error('Error initializing chat table', { error: error.message });
     }
 };
 
@@ -397,7 +427,7 @@ initializeChatTable();
 // Graceful shutdown
 const closePool = async () => {
     await pool.end();
-    console.log('PostgreSQL pool has ended');
+    logger.info('PostgreSQL pool has ended');
 };
 
 process.on('SIGINT', closePool);

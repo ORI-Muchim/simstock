@@ -180,7 +180,7 @@ function connectToChat() {
     
     // Use the same WebSocket server but different endpoint for chat
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/chat`;
+    const wsUrl = `${protocol}//${window.location.host}/chat?token=${encodeURIComponent(token)}`;
     
     try {
         chatSocket = new WebSocket(wsUrl);
