@@ -249,6 +249,9 @@ function switchPage(page) {
     } else if (page === 'history') {
         // Redirect to history page
         window.location.href = '/history';
+    } else if (page === 'rankings') {
+        // Redirect to rankings page
+        window.location.href = '/rankings';
     } else {
         tradePage.style.display = 'block';
         marketsPage.style.display = 'none';

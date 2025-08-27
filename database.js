@@ -56,10 +56,10 @@ const createUser = async (username, password) => {
         
         const userId = userResult.rows[0].id;
         
-        // Create initial user data
+        // Create initial user data (default to 'real' account)
         await client.query(
-            'INSERT INTO user_data (user_id) VALUES ($1)',
-            [userId]
+            'INSERT INTO user_data (user_id, account_type) VALUES ($1, $2)',
+            [userId, 'real']
         );
         
         await client.query('COMMIT');
@@ -424,6 +424,158 @@ const initializeChatTable = async () => {
 // Call initialization on startup
 initializeChatTable();
 
+// Ranking system functions
+/**
+ * Get trading rankings (excluding demo accounts)
+ * @param {number} [limit=50] - Number of top users to return
+ * @returns {Promise<Array>} Array of user rankings with stats
+ */
+const getRankings = async (limit = 50) => {
+    try {
+        // First, check if account_type column exists
+        const columnCheck = await pool.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'user_data' AND column_name = 'account_type'
+        `);
+        
+        const hasAccountType = columnCheck.rows.length > 0;
+        
+        // Use simpler query that works without account_type column
+        const result = await pool.query(`
+            WITH user_stats AS (
+                SELECT 
+                    u.id,
+                    u.username,
+                    COALESCE(ud.usd_balance, 10000) as usd_balance,
+                    COALESCE(ud.btc_balance, 0) as btc_balance,
+                    COALESCE(ud.transactions, '[]'::jsonb) as transactions,
+                    COALESCE(ud.leverage_positions, '[]'::jsonb) as leverage_positions,
+                    u.created_at as member_since
+                FROM users u
+                LEFT JOIN user_data ud ON u.id = ud.user_id
+                ${hasAccountType ? "WHERE COALESCE(ud.account_type, 'real') = 'real'" : ""}
+            ),
+            calculated_stats AS (
+                SELECT 
+                    us.id,
+                    us.username,
+                    us.usd_balance,
+                    us.btc_balance,
+                    us.member_since,
+                    -- Calculate total asset value (use fixed BTC price for now)
+                    (us.usd_balance + (us.btc_balance * 50000)) as total_assets,
+                    -- Calculate ROI based on initial $10,000
+                    ((us.usd_balance + (us.btc_balance * 50000) - 10000) / 10000 * 100) as roi,
+                    -- Calculate trading statistics
+                    jsonb_array_length(us.transactions) as total_trades,
+                    -- Simple win rate calculation (placeholder)
+                    CASE 
+                        WHEN jsonb_array_length(us.transactions) > 0 
+                        THEN (
+                            SELECT COUNT(*)::float / jsonb_array_length(us.transactions) * 100
+                            FROM jsonb_array_elements(us.transactions) as txn
+                            WHERE COALESCE((txn->>'pnl')::float, 0) > 0
+                        )
+                        ELSE 0
+                    END as win_rate
+                FROM user_stats us
+            )
+            SELECT 
+                id,
+                username,
+                total_assets,
+                roi,
+                total_trades,
+                COALESCE(win_rate, 0) as win_rate,
+                member_since,
+                ROW_NUMBER() OVER (ORDER BY roi DESC, total_assets DESC) as rank
+            FROM calculated_stats
+            WHERE total_trades > 0 OR total_assets != 10000
+            ORDER BY roi DESC, total_assets DESC
+            LIMIT $1
+        `, [limit]);
+        
+        return result.rows;
+    } catch (error) {
+        logger.error('Error fetching rankings', { error: error.message, stack: error.stack });
+        throw error;
+    }
+};
+
+/**
+ * Get specific user ranking and stats
+ * @param {number} userId - User ID to get ranking for
+ * @returns {Promise<Object|null>} User ranking data or null
+ */
+const getUserRanking = async (userId) => {
+    try {
+        // Get all rankings first
+        const allRankings = await getRankings(100);
+        
+        // Find the user in the rankings
+        const userRanking = allRankings.find(ranking => ranking.id === userId);
+        
+        if (!userRanking) {
+            return null;
+        }
+        
+        return userRanking;
+    } catch (error) {
+        logger.error('Error fetching user ranking', { userId, error: error.message, stack: error.stack });
+        throw error;
+    }
+};
+
+/**
+ * Update user account type
+ * @param {number} userId - User ID
+ * @param {'real'|'demo'} accountType - Account type
+ * @returns {Promise<boolean>} Success status
+ */
+const updateAccountType = async (userId, accountType) => {
+    try {
+        const result = await pool.query(
+            'UPDATE user_data SET account_type = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+            [accountType, userId]
+        );
+        
+        return result.rowCount > 0;
+    } catch (error) {
+        logger.error('Error updating account type', { userId, accountType, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Initialize account_type column if it doesn't exist
+ */
+const initializeAccountTypeColumn = async () => {
+    try {
+        // Check if account_type column exists
+        const columnExists = await pool.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'user_data' AND column_name = 'account_type'
+        `);
+        
+        if (columnExists.rows.length === 0) {
+            // Add account_type column
+            await pool.query(`
+                ALTER TABLE user_data 
+                ADD COLUMN account_type VARCHAR(10) DEFAULT 'real'
+            `);
+            
+            logger.info('Added account_type column to user_data table');
+        }
+    } catch (error) {
+        logger.error('Error initializing account_type column', { error: error.message });
+    }
+};
+
+// Initialize account_type column on startup
+initializeAccountTypeColumn();
+
 // Graceful shutdown
 const closePool = async () => {
     await pool.end();
@@ -452,5 +604,9 @@ module.exports = {
     saveChatMessage,
     getChatHistory,
     deleteChatMessage,
+    // Ranking functions
+    getRankings,
+    getUserRanking,
+    updateAccountType,
     closePool
 };

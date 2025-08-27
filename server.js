@@ -12,7 +12,7 @@ const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
 const { validationRules, sanitizers } = require('./middleware/validation');
-const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings, saveChatMessage, getChatHistory } = require('./database');
+const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings, saveChatMessage, getChatHistory, getRankings, getUserRanking, updateAccountType } = require('./database');
 const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
 const AlertManager = require('./monitoring/alert-manager');
@@ -273,6 +273,10 @@ app.get('/monitoring', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'monitoring.html'));
 });
 
+app.get('/rankings', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'rankings.html'));
+});
+
 // Legacy routes for backwards compatibility
 app.get('/login.html', (req, res) => {
     res.redirect('/login');
@@ -288,6 +292,10 @@ app.get('/settings.html', (req, res) => {
 
 app.get('/monitoring.html', (req, res) => {
     res.redirect('/monitoring');
+});
+
+app.get('/rankings.html', (req, res) => {
+    res.redirect('/rankings');
 });
 
 // HTTP Server
@@ -1353,6 +1361,8 @@ app.get('/api/user/data', authenticateToken, async (req, res) => {
         }
         
         const responseData = {
+            id: req.user.id,
+            username: req.user.username,
             usdBalance: userData.usd_balance,
             btcBalance: userData.btc_balance,
             transactions: userData.transactions,
@@ -1376,6 +1386,157 @@ app.post('/api/user/data', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Error updating user data:', error);
         res.status(500).json(createAPIResponse.error('Failed to update user data', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/rankings:
+ *   get:
+ *     tags:
+ *       - Rankings
+ *     summary: Get investment rankings
+ *     description: Retrieve top performing users (excludes demo accounts)
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 50
+ *         description: Number of rankings to return
+ *     responses:
+ *       200:
+ *         description: Rankings retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StandardAPIResponse'
+ *       500:
+ *         description: Server error
+ */
+// Get investment rankings
+app.get('/api/rankings', async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const rankings = await getRankings(limit);
+        
+        res.json(createAPIResponse.success({
+            rankings,
+            totalUsers: rankings.length,
+            lastUpdated: new Date().toISOString()
+        }, 'Rankings retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching rankings:', { error: error.message, stack: error.stack });
+        res.status(500).json(createAPIResponse.error('Failed to fetch rankings', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/rankings/user/{userId}:
+ *   get:
+ *     tags:
+ *       - Rankings
+ *     summary: Get specific user ranking
+ *     description: Get ranking information for a specific user
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: User ID to get ranking for
+ *     responses:
+ *       200:
+ *         description: User ranking retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StandardAPIResponse'
+ *       404:
+ *         description: User not found or user is demo account
+ *       500:
+ *         description: Server error
+ */
+// Get specific user ranking
+app.get('/api/rankings/user/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        
+        if (!userId || userId <= 0) {
+            return res.status(400).json(createAPIResponse.error('Invalid user ID', null, 400));
+        }
+        
+        const userRanking = await getUserRanking(userId);
+        
+        if (!userRanking) {
+            return res.status(404).json(createAPIResponse.error('User not found or user is demo account', null, 404));
+        }
+        
+        res.json(createAPIResponse.success(userRanking, 'User ranking retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching user ranking:', { userId: req.params.userId, error: error.message, stack: error.stack });
+        res.status(500).json(createAPIResponse.error('Failed to fetch user ranking', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/account/type:
+ *   post:
+ *     tags:
+ *       - Account
+ *     summary: Update account type
+ *     description: Update user account type (real/demo)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               accountType:
+ *                 type: string
+ *                 enum: ['real', 'demo']
+ *                 description: Account type
+ *             required:
+ *               - accountType
+ *     responses:
+ *       200:
+ *         description: Account type updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/StandardAPIResponse'
+ *       400:
+ *         description: Invalid account type
+ *       401:
+ *         description: Authentication required
+ *       500:
+ *         description: Server error
+ */
+// Update account type
+app.post('/api/account/type', authenticateToken, async (req, res) => {
+    try {
+        const { accountType } = req.body;
+        
+        if (!accountType || !['real', 'demo'].includes(accountType)) {
+            return res.status(400).json(createAPIResponse.error('Invalid account type. Must be "real" or "demo"', null, 400));
+        }
+        
+        await updateAccountType(req.user.id, accountType);
+        
+        res.json(createAPIResponse.success(
+            { accountType }, 
+            `Account type updated to ${accountType} successfully`
+        ));
+    } catch (error) {
+        logger.error('Error updating account type:', { userId: req.user.id, accountType: req.body.accountType, error: error.message, stack: error.stack });
+        res.status(500).json(createAPIResponse.error('Failed to update account type', null, 500));
     }
 });
 

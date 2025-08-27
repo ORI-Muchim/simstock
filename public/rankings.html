@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoSim - Investment Rankings</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script>
+        // Check authentication before loading
+        if (!localStorage.getItem('token')) {
+            window.location.href = '/login';
+        }
+    </script>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-container">
+            <div class="nav-left">
+                <div class="logo">
+                    <i class="fab fa-bitcoin"></i>
+                    <span>CryptoSim</span>
+                </div>
+                <div class="nav-menu">
+                    <a href="/" class="nav-item" id="nav-trade">Trade</a>
+                    <a href="/?page=markets" class="nav-item" id="nav-markets">Markets</a>
+                    <a href="/history" class="nav-item">History</a>
+                    <a href="/rankings" class="nav-item active">Rankings</a>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="welcome-message">
+                    <span>Welcome! <span id="current-user">User</span>
+                </div>
+                <div class="account-info">
+                    <div class="wallet-summary">
+                        <div class="wallet-item">
+                            <span class="wallet-label">USDT Balance</span>
+                            <span class="wallet-value" id="krw-balance">$10,000.00</span>
+                        </div>
+                        <div class="wallet-item">
+                            <span class="wallet-label" id="crypto-balance-label">BTC Balance</span>
+                            <span class="wallet-value" id="btc-balance">0.00000000</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="user-dropdown">
+                    <button class="user-menu-trigger">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                    <div class="dropdown-menu">
+                        <a href="/settings" class="dropdown-item">
+                            <i class="fas fa-cog"></i> Account Settings
+                        </a>
+                        <div class="dropdown-divider"></div>
+                        <a href="#" class="dropdown-item" id="logout-btn">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="rankings-wrapper">
+        <!-- Rankings Header -->
+        <div class="rankings-header-section">
+            <div class="section-header">
+                <h2>Investment Rankings</h2>
+                <div class="rankings-info">
+                    <div class="info-item">
+                        <i class="fas fa-info-circle"></i>
+                        <span>Real accounts only • Updated in real-time</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="refresh-time">Last updated: <span id="last-updated">-</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Your Ranking -->
+        <div class="user-ranking-section" id="user-ranking-section" style="display: none;">
+            <div class="section-header">
+                <h3>Your Current Ranking</h3>
+            </div>
+            <div class="user-rank-card">
+                <div class="rank-position">
+                    <span class="rank-number">#<span id="user-rank">-</span></span>
+                </div>
+                <div class="rank-details">
+                    <div class="rank-stat">
+                        <span class="rank-label">Total Assets</span>
+                        <span class="rank-value" id="user-total-assets">$0.00</span>
+                    </div>
+                    <div class="rank-stat">
+                        <span class="rank-label">ROI</span>
+                        <span class="rank-value" id="user-roi">0.00%</span>
+                    </div>
+                    <div class="rank-stat">
+                        <span class="rank-label">Win Rate</span>
+                        <span class="rank-value" id="user-win-rate">0.00%</span>
+                    </div>
+                    <div class="rank-stat">
+                        <span class="rank-label">Total Trades</span>
+                        <span class="rank-value" id="user-total-trades">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="rankings-controls">
+            <div class="control-group">
+                <label for="ranking-limit">Show top:</label>
+                <select id="ranking-limit" class="control-select">
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <button id="refresh-rankings" class="refresh-btn">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Rankings Table -->
+        <div class="rankings-table-section">
+            <div class="rankings-table-container">
+                <table class="rankings-table">
+                    <thead>
+                        <tr>
+                            <th class="rank-col">Rank</th>
+                            <th class="username-col">Username</th>
+                            <th class="assets-col">Total Assets</th>
+                            <th class="roi-col">ROI</th>
+                            <th class="winrate-col">Win Rate</th>
+                            <th class="trades-col">Total Trades</th>
+                            <th class="member-col">Member Since</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rankings-table-body">
+                        <!-- Rankings will be populated here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div class="loading-state" id="loading-state">
+            <div class="loading-spinner">
+                <i class="fas fa-spinner fa-spin"></i>
+            </div>
+            <p>Loading rankings...</p>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="empty-state" style="display: none;">
+            <div class="empty-icon">
+                <i class="fas fa-trophy"></i>
+            </div>
+            <h3>No Rankings Available</h3>
+            <p>Be the first to start trading and appear on the leaderboard!</p>
+        </div>
+    </div>
+
+    <script src="js/rankings.js?v=1.0.0"></script>
+</body>
+</html>
