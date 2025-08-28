@@ -30,6 +30,7 @@ function initializeChat() {
             // Connect to chat if not connected
             if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
                 connectToChat();
+            } else {
             }
         } else {
             // Close chat with animation
@@ -57,7 +58,7 @@ function initializeChat() {
         
         if (value === '/') {
             // Show all suggestions
-            suggestions.style.display = 'block';
+            suggestions.classList.remove('hidden');
             selectedSuggestionIndex = -1;
             // Reset all suggestions to visible
             suggestionItems.forEach(item => {
@@ -80,13 +81,13 @@ function initializeChat() {
             });
             
             if (hasVisibleSuggestion) {
-                suggestions.style.display = 'block';
+                suggestions.classList.remove('hidden');
             } else {
-                suggestions.style.display = 'none';
+                suggestions.classList.add('hidden');
             }
         } else {
             // Hide suggestions
-            suggestions.style.display = 'none';
+            suggestions.classList.add('hidden');
             selectedSuggestionIndex = -1;
             // Reset all suggestions for next time
             suggestionItems.forEach(item => {
@@ -97,7 +98,7 @@ function initializeChat() {
     
     // Handle keyboard navigation for suggestions
     chatInput.addEventListener('keydown', (e) => {
-        if (suggestions.style.display === 'block') {
+        if (!suggestions.classList.contains('hidden')) {
             const visibleItems = Array.from(suggestionItems).filter(item => 
                 item.style.display !== 'none'
             );
@@ -115,11 +116,11 @@ function initializeChat() {
                 if (visibleItems[selectedSuggestionIndex]) {
                     const command = visibleItems[selectedSuggestionIndex].dataset.command;
                     chatInput.value = command + ' ';
-                    suggestions.style.display = 'none';
+                    suggestions.classList.add('hidden');
                     selectedSuggestionIndex = -1;
                 }
             } else if (e.key === 'Escape') {
-                suggestions.style.display = 'none';
+                suggestions.classList.add('hidden');
                 selectedSuggestionIndex = -1;
             }
         }
@@ -134,7 +135,7 @@ function initializeChat() {
     suggestionItems.forEach((item, index) => {
         item.addEventListener('click', () => {
             chatInput.value = item.dataset.command + ' ';
-            suggestions.style.display = 'none';
+            suggestions.classList.add('hidden');
             chatInput.focus();
         });
     });
@@ -157,7 +158,7 @@ function initializeChat() {
     // Hide suggestions when clicking outside
     document.addEventListener('click', (e) => {
         if (!chatContainer.contains(e.target)) {
-            suggestions.style.display = 'none';
+            suggestions.classList.add('hidden');
             selectedSuggestionIndex = -1;
         }
     });
@@ -165,8 +166,13 @@ function initializeChat() {
     // Send message on button click
     chatSend.addEventListener('click', sendChatMessage);
     
-    // Connect to chat WebSocket
-    connectToChat();
+    // Initialize online count display
+    updateOnlineCount(0);
+    
+    // Connect to chat WebSocket only if logged in
+    if (localStorage.getItem('token') && localStorage.getItem('username')) {
+        connectToChat();
+    }
 }
 
 function connectToChat() {
@@ -174,25 +180,37 @@ function connectToChat() {
     const username = localStorage.getItem('username');
     
     if (!token || !username) {
-        console.log('Not logged in, skipping chat connection');
+        displaySystemMessage('Please log in to use chat.');
         return;
     }
+    
     
     // Use the same WebSocket server but different endpoint for chat
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/chat?token=${encodeURIComponent(token)}`;
     
+    
+    // Close existing connection if any
+    if (chatSocket) {
+        chatSocket.close();
+        chatSocket = null;
+    }
+    
     try {
         chatSocket = new WebSocket(wsUrl);
         
         chatSocket.onopen = () => {
-            console.log('Connected to chat server');
-            // Send authentication
-            chatSocket.send(JSON.stringify({
-                type: 'auth',
-                token: token,
-                username: username
-            }));
+            // Send authentication after a small delay to ensure connection is ready
+            setTimeout(() => {
+                if (chatSocket.readyState === WebSocket.OPEN) {
+                    chatSocket.send(JSON.stringify({
+                        type: 'auth',
+                        token: token,
+                        username: username
+                    }));
+                } else {
+                }
+            }, 100);
         };
         
         chatSocket.onmessage = (event) => {
@@ -200,25 +218,29 @@ function connectToChat() {
                 const data = JSON.parse(event.data);
                 handleChatMessage(data);
             } catch (error) {
-                console.error('Error parsing chat message:', error);
             }
         };
         
         chatSocket.onerror = (error) => {
-            console.error('Chat WebSocket error:', error);
+            displaySystemMessage('Chat connection error. Please try again.');
         };
         
-        chatSocket.onclose = () => {
-            console.log('Disconnected from chat server');
-            // Try to reconnect after 5 seconds
-            setTimeout(() => {
+        chatSocket.onclose = (event) => {
+            // Only reconnect if the chat is still open and it wasn't a normal close
+            if (event.code !== 1000 && event.code !== 1001) {
                 if (isChatOpen || document.getElementById('chat-container').classList.contains('active')) {
-                    connectToChat();
+                    displaySystemMessage('Chat connection lost. Attempting to reconnect...');
+                    // Try to reconnect after 3 seconds
+                    setTimeout(() => {
+                        if (isChatOpen || document.getElementById('chat-container').classList.contains('active')) {
+                            connectToChat();
+                        }
+                    }, 3000);
                 }
-            }, 5000);
+            }
         };
     } catch (error) {
-        console.error('Failed to connect to chat:', error);
+        displaySystemMessage('Failed to initialize chat connection.');
     }
 }
 
@@ -248,12 +270,16 @@ function handleChatMessage(data) {
         case 'trade_share':
             displayTradeShare(data);
             break;
+            
+        default:
     }
 }
 
 function displayChatMessage(data) {
     const messagesContainer = document.getElementById('chat-messages');
     const currentUser = localStorage.getItem('username');
+    
+    const messageText = escapeHtml(data.message);
     
     // Remove welcome message if it exists
     const welcomeMsg = messagesContainer.querySelector('.chat-welcome');
@@ -272,7 +298,7 @@ function displayChatMessage(data) {
                 <span class="chat-username">${data.username}</span>
                 <span class="chat-timestamp">${timestamp}</span>
             </div>
-            <div class="chat-message-text">${escapeHtml(data.message)}</div>
+            <div class="chat-message-text">${messageText}</div>
         </div>
     `;
     
@@ -411,25 +437,55 @@ function sendChatMessage() {
         }
     } else {
         // Send regular message
-        chatSocket.send(JSON.stringify({
-            type: 'message',
-            message: message
-        }));
+        try {
+            if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+                chatSocket.send(JSON.stringify({
+                    type: 'message',
+                    message: message
+                }));
+            } else {
+                showToast('Chat is not ready. Please wait and try again.', 'warning');
+                // Try to reconnect if not connected
+                if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
+                    connectToChat();
+                }
+                return;
+            }
+        } catch (error) {
+            console.error('Failed to send chat message:', error);
+            showToast('Failed to send message. Please try again.', 'error');
+            // Try to reconnect on send error
+            connectToChat();
+            return;
+        }
     }
     
     chatInput.value = '';
     
     // Hide suggestions after sending
     const suggestions = document.getElementById('chat-suggestions');
-    suggestions.style.display = 'none';
+    suggestions.classList.add('hidden');
     selectedSuggestionIndex = -1;
 }
 
 function shareLastTrade() {
-    // Get the last closed position from transactions
-    const lastTrade = transactions.find(tx => 
+    // Check if transactions array exists
+    if (typeof transactions === 'undefined' || !transactions) {
+        displaySystemMessage('No trading data available. Please make some trades first.');
+        return;
+    }
+    
+    // Get the last closed position from transactions (search from the end)
+    const tradeTransactions = transactions.filter(tx => 
         tx.type?.startsWith('close_') || tx.type === 'liquidation'
     );
+    const lastTrade = tradeTransactions[tradeTransactions.length - 1];
+    
+    console.log('shareLastTrade debug:');
+    console.log('- Total transactions:', transactions.length);
+    console.log('- Trade transactions:', tradeTransactions.length);
+    console.log('- Last trade:', lastTrade);
+    console.log('- Last trade type:', lastTrade?.type);
     
     if (!lastTrade) {
         displaySystemMessage('No trades to share yet.');
@@ -440,7 +496,7 @@ function shareLastTrade() {
     if (lastTrade.type === 'liquidation') {
         tradeData = {
             type: 'trade_share',
-            message: '💀 Got liquidated!',
+            message: 'Got liquidated!',
             tradeType: `LIQUIDATED ${lastTrade.positionType?.toUpperCase() || 'POSITION'}`,
             leverage: lastTrade.leverage || 1,
             entryPrice: (lastTrade.entryPrice || 0).toFixed(2),
@@ -451,7 +507,7 @@ function shareLastTrade() {
         const positionType = lastTrade.type.replace('close_', '').toUpperCase();
         tradeData = {
             type: 'trade_share',
-            message: lastTrade.pnl >= 0 ? '🚀 Closed with profit!' : '📉 Closed with loss',
+            message: lastTrade.pnl >= 0 ? 'Closed with profit!' : 'Closed with loss',
             tradeType: `CLOSE ${positionType}`,
             leverage: lastTrade.leverage || 1,
             entryPrice: (lastTrade.entryPrice || 0).toFixed(2),
@@ -460,7 +516,16 @@ function shareLastTrade() {
         };
     }
     
-    chatSocket.send(JSON.stringify(tradeData));
+    try {
+        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify(tradeData));
+        } else {
+            displaySystemMessage('Chat is not connected. Cannot share trade.');
+        }
+    } catch (error) {
+        console.error('Failed to share trade:', error);
+        displaySystemMessage('Failed to share trade. Please try again.');
+    }
 }
 
 function updateOnlineCount(count) {
@@ -468,6 +533,7 @@ function updateOnlineCount(count) {
     const onlineCountElement = document.getElementById('online-count');
     if (onlineCountElement) {
         onlineCountElement.textContent = `(${count} online)`;
+    } else {
     }
 }
 
@@ -519,10 +585,27 @@ function showTradingStats() {
 
 // Export functions for use in main script
 window.shareTradeToChat = function(tradeInfo) {
-    if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
-        chatSocket.send(JSON.stringify({
-            type: 'trade_share',
-            ...tradeInfo
-        }));
+    try {
+        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify({
+                type: 'trade_share',
+                ...tradeInfo
+            }));
+        } else {
+            console.log('Chat is not connected, cannot share trade');
+        }
+    } catch (error) {
+        console.error('Failed to share trade to chat:', error);
+    }
+};
+
+// Function to initialize chat after login
+window.initializeChatAfterLogin = function() {
+    const token = localStorage.getItem('token');
+    const username = localStorage.getItem('username');
+    
+    if (token && username) {
+        connectToChat();
+    } else {
     }
 };

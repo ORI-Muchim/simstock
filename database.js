@@ -39,6 +39,71 @@ const pool = new Pool({
  * @returns {Promise<number>} The created user ID
  * @throws {Error} If user creation fails or username exists
  */
+// Initialize database tables for alerts and stop/take profit orders
+const initializeAlertTables = async () => {
+    try {
+        // Create alert_settings table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS alert_settings (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                price_alert_enabled BOOLEAN DEFAULT true,
+                price_alert_threshold DECIMAL(5,2) DEFAULT 1.00,
+                email_alerts BOOLEAN DEFAULT false,
+                browser_alerts BOOLEAN DEFAULT true,
+                sound_enabled BOOLEAN DEFAULT true,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id)
+            )
+        `);
+
+        // Create stop_orders table for stop loss and take profit orders
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS stop_orders (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                market VARCHAR(20) NOT NULL,
+                position_type VARCHAR(10) NOT NULL,
+                order_type VARCHAR(20) NOT NULL,
+                trigger_price DECIMAL(20,2) NOT NULL,
+                amount DECIMAL(20,8) NOT NULL,
+                leverage INTEGER DEFAULT 1,
+                status VARCHAR(20) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                executed_at TIMESTAMP,
+                execution_price DECIMAL(20,2),
+                CHECK (order_type IN ('stop_loss', 'take_profit')),
+                CHECK (position_type IN ('spot', 'long', 'short')),
+                CHECK (status IN ('active', 'triggered', 'cancelled', 'expired'))
+            )
+        `);
+
+        // Create price_alerts table for triggered alerts history
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS price_alerts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                market VARCHAR(20) NOT NULL,
+                alert_type VARCHAR(20) NOT NULL,
+                previous_price DECIMAL(20,2) NOT NULL,
+                current_price DECIMAL(20,2) NOT NULL,
+                change_percent DECIMAL(10,2) NOT NULL,
+                message TEXT,
+                acknowledged BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CHECK (alert_type IN ('price_spike', 'price_drop', 'stop_loss', 'take_profit'))
+            )
+        `);
+
+        logger.info('Alert and stop order tables initialized successfully');
+    } catch (error) {
+        logger.error('Error initializing alert tables', { error: error.message });
+    }
+};
+
+// Initialize tables on startup
+initializeAlertTables();
+
 const createUser = async (username, password) => {
     const client = await pool.connect();
     
@@ -582,6 +647,261 @@ const closePool = async () => {
     logger.info('PostgreSQL pool has ended');
 };
 
+/**
+ * Get user alert settings
+ * @param {number} userId - User ID
+ * @returns {Promise<Object|null>} Alert settings or null
+ */
+const getAlertSettings = async (userId) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM alert_settings WHERE user_id = $1',
+            [userId]
+        );
+        
+        if (result.rows.length === 0) {
+            // Create default settings if not exists
+            const insertResult = await pool.query(
+                `INSERT INTO alert_settings (user_id) VALUES ($1) 
+                 RETURNING *`,
+                [userId]
+            );
+            return insertResult.rows[0];
+        }
+        
+        return result.rows[0];
+    } catch (error) {
+        logger.error('Error getting alert settings', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Update user alert settings
+ * @param {number} userId - User ID
+ * @param {Object} settings - Alert settings to update
+ * @returns {Promise<boolean>} Success status
+ */
+const updateAlertSettings = async (userId, settings) => {
+    try {
+        const {
+            price_alert_enabled,
+            price_alert_threshold,
+            email_alerts,
+            browser_alerts,
+            sound_enabled
+        } = settings;
+        
+        await pool.query(
+            `INSERT INTO alert_settings 
+                (user_id, price_alert_enabled, price_alert_threshold, 
+                 email_alerts, browser_alerts, sound_enabled)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (user_id)
+             DO UPDATE SET 
+                price_alert_enabled = $2,
+                price_alert_threshold = $3,
+                email_alerts = $4,
+                browser_alerts = $5,
+                sound_enabled = $6,
+                updated_at = CURRENT_TIMESTAMP`,
+            [userId, price_alert_enabled, price_alert_threshold,
+             email_alerts, browser_alerts, sound_enabled]
+        );
+        
+        return true;
+    } catch (error) {
+        logger.error('Error updating alert settings', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Create stop loss or take profit order
+ * @param {Object} orderData - Order data
+ * @returns {Promise<number>} Created order ID
+ */
+const createStopOrder = async (orderData) => {
+    try {
+        const {
+            user_id,
+            market,
+            position_type,
+            order_type,
+            trigger_price,
+            amount,
+            leverage = 1
+        } = orderData;
+        
+        const result = await pool.query(
+            `INSERT INTO stop_orders 
+                (user_id, market, position_type, order_type, 
+                 trigger_price, amount, leverage)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id`,
+            [user_id, market, position_type, order_type, 
+             trigger_price, amount, leverage]
+        );
+        
+        return result.rows[0].id;
+    } catch (error) {
+        logger.error('Error creating stop order', { error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Get active stop orders for user
+ * @param {number} userId - User ID
+ * @param {string} [market] - Optional market filter
+ * @returns {Promise<Array>} Array of stop orders
+ */
+const getActiveStopOrders = async (userId, market = null) => {
+    try {
+        let query = 'SELECT * FROM stop_orders WHERE user_id = $1 AND status = $2';
+        const params = [userId, 'active'];
+        
+        if (market) {
+            query += ' AND market = $3';
+            params.push(market);
+        }
+        
+        query += ' ORDER BY created_at DESC';
+        
+        const result = await pool.query(query, params);
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting stop orders', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Cancel stop order
+ * @param {number} orderId - Order ID
+ * @param {number} userId - User ID for security
+ * @returns {Promise<boolean>} Success status
+ */
+const cancelStopOrder = async (orderId, userId) => {
+    try {
+        const result = await pool.query(
+            `UPDATE stop_orders 
+             SET status = 'cancelled'
+             WHERE id = $1 AND user_id = $2 AND status = 'active'
+             RETURNING id`,
+            [orderId, userId]
+        );
+        
+        return result.rows.length > 0;
+    } catch (error) {
+        logger.error('Error cancelling stop order', { orderId, userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Execute stop order
+ * @param {number} orderId - Order ID
+ * @param {number} executionPrice - Execution price
+ * @returns {Promise<Object|null>} Executed order data or null
+ */
+const executeStopOrder = async (orderId, executionPrice) => {
+    try {
+        const result = await pool.query(
+            `UPDATE stop_orders 
+             SET status = 'triggered',
+                 executed_at = CURRENT_TIMESTAMP,
+                 execution_price = $2
+             WHERE id = $1 AND status = 'active'
+             RETURNING *`,
+            [orderId, executionPrice]
+        );
+        
+        return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+        logger.error('Error executing stop order', { orderId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Save price alert
+ * @param {Object} alertData - Alert data
+ * @returns {Promise<number>} Created alert ID
+ */
+const savePriceAlert = async (alertData) => {
+    try {
+        const {
+            user_id,
+            market,
+            alert_type,
+            previous_price,
+            current_price,
+            change_percent,
+            message
+        } = alertData;
+        
+        const result = await pool.query(
+            `INSERT INTO price_alerts 
+                (user_id, market, alert_type, previous_price, 
+                 current_price, change_percent, message)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id`,
+            [user_id, market, alert_type, previous_price,
+             current_price, change_percent, message]
+        );
+        
+        return result.rows[0].id;
+    } catch (error) {
+        logger.error('Error saving price alert', { error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Get unacknowledged alerts for user
+ * @param {number} userId - User ID
+ * @returns {Promise<Array>} Array of alerts
+ */
+const getUnacknowledgedAlerts = async (userId) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM price_alerts 
+             WHERE user_id = $1 AND acknowledged = false
+             ORDER BY created_at DESC
+             LIMIT 10`,
+            [userId]
+        );
+        
+        return result.rows;
+    } catch (error) {
+        logger.error('Error getting unacknowledged alerts', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Acknowledge alerts
+ * @param {number} userId - User ID
+ * @param {Array<number>} alertIds - Alert IDs to acknowledge
+ * @returns {Promise<boolean>} Success status
+ */
+const acknowledgeAlerts = async (userId, alertIds) => {
+    try {
+        await pool.query(
+            `UPDATE price_alerts 
+             SET acknowledged = true
+             WHERE user_id = $1 AND id = ANY($2)`,
+            [userId, alertIds]
+        );
+        
+        return true;
+    } catch (error) {
+        logger.error('Error acknowledging alerts', { userId, error: error.message });
+        throw error;
+    }
+};
+
 process.on('SIGINT', closePool);
 process.on('SIGTERM', closePool);
 
@@ -608,5 +928,15 @@ module.exports = {
     getRankings,
     getUserRanking,
     updateAccountType,
+    // Alert functions
+    getAlertSettings,
+    updateAlertSettings,
+    createStopOrder,
+    getActiveStopOrders,
+    cancelStopOrder,
+    executeStopOrder,
+    savePriceAlert,
+    getUnacknowledgedAlerts,
+    acknowledgeAlerts,
     closePool
 };

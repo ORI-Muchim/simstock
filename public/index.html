@@ -362,7 +362,7 @@
                                     <input type="text" id="buy-total" readonly placeholder="0.00">
                                     <span class="input-suffix">USDT</span>
                                 </div>
-                                <small id="spot-buy-fee-info" style="color: #9ca3af; margin-top: 4px; display: block;">Fee: 0.050% (Taker)</small>
+                                <small id="spot-buy-fee-info" class="fee-info">Fee: 0.050% (Taker)</small>
                             </div>
                             <div class="balance-info">
                                 <span>Available:</span>
@@ -401,7 +401,7 @@
                                     <input type="text" id="sell-total" readonly placeholder="0.00">
                                     <span class="input-suffix">USDT</span>
                                 </div>
-                                <small id="spot-sell-fee-info" style="color: #9ca3af; margin-top: 4px; display: block;">Fee: 0.050% (Taker)</small>
+                                <small id="spot-sell-fee-info" class="fee-info">Fee: 0.050% (Taker)</small>
                             </div>
                             <div class="balance-info">
                                 <span>Available:</span>
@@ -451,8 +451,9 @@
                                 <div class="form-group">
                                     <label>Position Size</label>
                                     <input type="text" id="position-size" readonly placeholder="0.00 USDT">
-                                    <small id="leverage-fee-info" style="color: #9ca3af; margin-top: 4px; display: block;">Fees: 0.050% each way (Taker)</small>
+                                    <small id="leverage-fee-info" class="fee-info">Fees: 0.050% each way (Taker)</small>
                                 </div>
+                                
                                 <button class="order-btn leverage-btn" id="open-position-btn">
                                     Open Position
                                 </button>
@@ -465,7 +466,7 @@
     </div>
 
     <!-- Markets Page -->
-    <div class="main-wrapper" id="markets-page" style="display: none;">
+    <div class="main-wrapper hidden" id="markets-page">
         <div class="markets-container">
             <h2 class="markets-title">Cryptocurrency Markets</h2>
             <div class="markets-grid">
@@ -627,7 +628,7 @@
             </div>
         </div>
         <div class="chat-input-wrapper">
-            <div class="chat-suggestions" id="chat-suggestions" style="display: none;">
+            <div class="chat-suggestions hidden" id="chat-suggestions">
                 <div class="suggestion-item" data-command="/share">
                     <span class="suggestion-command">/share</span>
                     <span class="suggestion-desc">Share your last trade</span>
@@ -657,8 +658,99 @@
     <!-- Floating Chat Button -->
     <button class="chat-toggle" id="chat-toggle">
         <i class="fas fa-comment-dots"></i>
-        <span class="chat-notification" id="chat-notification" style="display: none;">0</span>
+        <span class="chat-notification hidden" id="chat-notification">0</span>
     </button>
+
+    <!-- Position Stop Orders Modal -->
+    <div class="position-stop-modal" id="position-stop-modal">
+        <div class="position-stop-content">
+            <div class="position-stop-header">
+                <h3 class="position-stop-title">Stop Loss & Take Profit</h3>
+                <button class="modal-close-btn" id="modal-close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="position-info-summary" id="position-info-summary">
+                <!-- Position info will be populated here -->
+            </div>
+            
+            <div class="stop-orders-section">
+                <!-- Stop Loss Section -->
+                <div class="stop-order-card stop-loss-card">
+                    <div class="stop-card-header">
+                        <label class="stop-label">
+                            <input type="checkbox" id="modal-stop-loss-enabled" class="stop-checkbox">
+                            <span class="stop-icon">🛑</span>
+                            <span>Stop Loss</span>
+                        </label>
+                        <div class="current-price-ref" id="modal-stop-loss-current">Current: $0</div>
+                    </div>
+                    <div class="stop-input-methods hidden" id="modal-stop-loss-inputs">
+                        <div class="input-method-tabs">
+                            <button type="button" class="method-tab active" data-method="percent" data-type="modal-stop-loss">Percent</button>
+                            <button type="button" class="method-tab" data-method="price" data-type="modal-stop-loss">Price</button>
+                        </div>
+                        <div class="method-content percent-method active">
+                            <label>Loss Percentage</label>
+                            <div class="range-input-wrapper">
+                                <input type="range" id="modal-stop-loss-percent-slider" min="1" max="50" value="10" step="1">
+                                <div class="range-value">-<span id="modal-stop-loss-percent-value">10</span>%</div>
+                            </div>
+                            <div class="calculated-price">Trigger Price: $<span id="modal-stop-loss-calculated">0</span></div>
+                        </div>
+                        <div class="method-content price-method">
+                            <label>Stop Loss Price</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="modal-stop-loss-price" placeholder="Enter stop loss price" step="0.01">
+                                <span class="input-suffix">USDT</span>
+                            </div>
+                            <div class="calculated-percent">Loss: -<span id="modal-stop-loss-calculated-percent">0</span>%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Take Profit Section -->
+                <div class="stop-order-card take-profit-card">
+                    <div class="stop-card-header">
+                        <label class="stop-label">
+                            <input type="checkbox" id="modal-take-profit-enabled" class="stop-checkbox">
+                            <span class="stop-icon">💰</span>
+                            <span>Take Profit</span>
+                        </label>
+                        <div class="current-price-ref" id="modal-take-profit-current">Current: $0</div>
+                    </div>
+                    <div class="stop-input-methods hidden" id="modal-take-profit-inputs">
+                        <div class="input-method-tabs">
+                            <button type="button" class="method-tab active" data-method="percent" data-type="modal-take-profit">Percent</button>
+                            <button type="button" class="method-tab" data-method="price" data-type="modal-take-profit">Price</button>
+                        </div>
+                        <div class="method-content percent-method active">
+                            <label>Profit Percentage</label>
+                            <div class="range-input-wrapper">
+                                <input type="range" id="modal-take-profit-percent-slider" min="1" max="100" value="20" step="1">
+                                <div class="range-value">+<span id="modal-take-profit-percent-value">20</span>%</div>
+                            </div>
+                            <div class="calculated-price profit">Trigger Price: $<span id="modal-take-profit-calculated">0</span></div>
+                        </div>
+                        <div class="method-content price-method">
+                            <label>Take Profit Price</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="modal-take-profit-price" placeholder="Enter take profit price" step="0.01">
+                                <span class="input-suffix">USDT</span>
+                            </div>
+                            <div class="calculated-percent profit">Profit: +<span id="modal-take-profit-calculated-percent">0</span>%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-action-buttons">
+                    <button class="btn btn-primary modal-btn" id="save-stop-orders">Save</button>
+                    <button class="btn btn-secondary modal-btn" id="cancel-stop-orders">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="js/script.js?v=1.0.9"></script>
     <script src="js/chat.js"></script>

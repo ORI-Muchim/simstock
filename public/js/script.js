@@ -43,7 +43,7 @@ function limitArraySize(array, maxSize) {
 
 // Helper function to add transaction with size limit
 function addTransactionWithLimit(transaction) {
-    addTransactionWithLimit(transaction);
+    transactions.push(transaction);
     limitArraySize(transactions, MAX_TRANSACTIONS);
     // Update cache if needed
     transactionCache.delete('all'); // Clear cache when new transaction added
@@ -55,6 +55,10 @@ let lineSeries = null;
 let volumeSeries = null;
 let currentInterval = '1m';
 let currentChartType = 'candlestick';
+
+// Stop order price lines on chart
+let stopLossLine = null;
+let takeProfitLine = null;
 let orderbook = { bids: [], asks: [] };
 let candleData = []; // Store candle data
 let avgPriceLine = null; // Average price line
@@ -75,6 +79,7 @@ let indicatorSettings = {
     rsi: { period: 14 },
     macd: { fast: 12, slow: 26, signal: 9 }
 };
+let activeIndicators = []; // Global array to track active indicators
 let drawingMode = null;
 let drawings = [];
 let chartClickHandler = null;
@@ -211,6 +216,21 @@ document.addEventListener('DOMContentLoaded', () => {
     setupMarketDropdown();
     setupTimezoneListener();
     
+    // Initialize chat if logged in
+    console.warn('🟡 CHAT DEBUG: Attempting to initialize chat...');
+    if (typeof window.initializeChatAfterLogin === 'function') {
+        console.warn('🟡 CHAT DEBUG: initializeChatAfterLogin function found, calling...');
+        window.initializeChatAfterLogin();
+    } else {
+        console.warn('🔴 CHAT DEBUG: initializeChatAfterLogin function not found');
+    }
+    
+    // Request notification permission for alerts
+    requestNotificationPermission();
+    
+    // Setup position stop orders modal
+    setupPositionStopModalEventListeners();
+    
     // Check URL parameters for page navigation
     const urlParams = new URLSearchParams(window.location.search);
     const page = urlParams.get('page');
@@ -240,8 +260,8 @@ function switchPage(page) {
     navItems.forEach(item => item.classList.remove('active'));
     
     if (page === 'markets') {
-        tradePage.style.display = 'none';
-        marketsPage.style.display = 'block';
+        tradePage.classList.add('hidden');
+        marketsPage.classList.remove('hidden');
         document.querySelector('.nav-item[data-page="markets"]').classList.add('active');
         updateMarketsData();
         // Update URL to show markets page
@@ -253,8 +273,8 @@ function switchPage(page) {
         // Redirect to rankings page
         window.location.href = '/rankings';
     } else {
-        tradePage.style.display = 'block';
-        marketsPage.style.display = 'none';
+        tradePage.classList.remove('hidden');
+        marketsPage.classList.add('hidden');
         document.querySelector('.nav-item[data-page="trade"]').classList.add('active');
         // Remove page parameter from URL when switching to trade
         window.history.replaceState({}, '', '/');
@@ -440,47 +460,63 @@ function selectMarket(market) {
     // Update UI for selected market
     const [crypto, base] = market.split('/');
     const marketBtn = document.querySelector('.market-select-btn');
-    const symbolSpan = marketBtn.querySelector('.symbol');
-    symbolSpan.textContent = market;
     
-    // Update coin icon
-    const coinIcon = marketBtn.querySelector('.coin-icon');
-    if (crypto === 'ETH') {
-        coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png';
-        coinIcon.alt = 'ETH';
-        currentCryptoBalance = ethBalance;
-        
-        // Update ETH balance with profit/loss
-        const ethProfit = spotProfits['ETH'] || { profitPercent: 0 };
-        const ethProfitText = ethProfit.profitPercent !== 0 ? 
-            ` <span class="${ethProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${ethProfit.profitPercent >= 0 ? '+' : ''}${ethProfit.profitPercent.toFixed(1)}%)</span>` : '';
-        document.getElementById('btc-balance').innerHTML = `${ethBalance.toFixed(8)}${ethProfitText}`;
-        
-        // Update crypto balance label
-        const cryptoLabel = document.getElementById('crypto-balance-label');
-        if (cryptoLabel) {
-            cryptoLabel.textContent = 'ETH Balance';
+    if (marketBtn) {
+        const symbolSpan = marketBtn.querySelector('.symbol');
+        if (symbolSpan) {
+            symbolSpan.textContent = market;
         }
-    } else {
-        coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1.png';
-        coinIcon.alt = 'BTC';
-        currentCryptoBalance = btcBalance;
         
-        // Update BTC balance with profit/loss
-        const btcProfit = spotProfits['BTC'] || { profitPercent: 0 };
-        const btcProfitText = btcProfit.profitPercent !== 0 ? 
-            ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
-        document.getElementById('btc-balance').innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
-        
-        // Update crypto balance label
-        const cryptoLabel = document.getElementById('crypto-balance-label');
-        if (cryptoLabel) {
-            cryptoLabel.textContent = 'BTC Balance';
+        // Update coin icon
+        const coinIcon = marketBtn.querySelector('.coin-icon');
+        if (coinIcon) {
+            if (crypto === 'ETH') {
+                coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png';
+                coinIcon.alt = 'ETH';
+                currentCryptoBalance = ethBalance;
+                
+                // Update ETH balance with profit/loss
+                const ethProfit = spotProfits['ETH'] || { profitPercent: 0 };
+                const ethProfitText = ethProfit.profitPercent !== 0 ? 
+                    ` <span class="${ethProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${ethProfit.profitPercent >= 0 ? '+' : ''}${ethProfit.profitPercent.toFixed(1)}%)</span>` : '';
+                const btcBalanceEl = document.getElementById('btc-balance');
+                if (btcBalanceEl) {
+                    btcBalanceEl.innerHTML = `${ethBalance.toFixed(8)}${ethProfitText}`;
+                }
+                
+                // Update crypto balance label
+                const cryptoLabel = document.getElementById('crypto-balance-label');
+                if (cryptoLabel) {
+                    cryptoLabel.textContent = 'ETH Balance';
+                }
+            } else {
+                coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1.png';
+                coinIcon.alt = 'BTC';
+                currentCryptoBalance = btcBalance;
+                
+                // Update BTC balance with profit/loss
+                const btcProfit = spotProfits['BTC'] || { profitPercent: 0 };
+                const btcProfitText = btcProfit.profitPercent !== 0 ? 
+                    ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
+                const btcBalanceEl = document.getElementById('btc-balance');
+                if (btcBalanceEl) {
+                    btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
+                }
+                
+                // Update crypto balance label
+                const cryptoLabel = document.getElementById('crypto-balance-label');
+                if (cryptoLabel) {
+                    cryptoLabel.textContent = 'BTC Balance';
+                }
+            }
         }
     }
     
+    // Update dropdown selection state
+    updateDropdownSelection();
+    
     // Switch to trade page if not already there
-    if (document.getElementById('markets-page').style.display !== 'none') {
+    if (!document.getElementById('markets-page').classList.contains('hidden')) {
         switchPage('trade');
     }
     
@@ -950,6 +986,12 @@ function initializeWebSocket() {
                     }
                 }
                 break;
+            case 'price_alert':
+                handlePriceAlert(data);
+                break;
+            case 'stop_order_executed':
+                handleStopOrderExecuted(data);
+                break;
         }
     };
     
@@ -963,6 +1005,137 @@ function initializeWebSocket() {
         showToast('Server disconnected. Reconnecting...', 'info');
         safeSetTimeout(initializeWebSocket, 5000);
     };
+}
+
+// Handle price alert notifications
+function handlePriceAlert(data) {
+    console.log('Price alert received:', data);
+    
+    const { symbol, currentPrice, changePercent, alertType, message } = data;
+    
+    // Show browser notification if permission granted
+    if ('Notification' in window && Notification.permission === 'granted') {
+        const title = `Price Alert: ${symbol}`;
+        const options = {
+            body: message || `Price changed by ${(changePercent * 100).toFixed(2)}% to $${currentPrice.toFixed(2)}`,
+            icon: '/favicon.ico',
+            tag: `price-alert-${symbol}`,
+            requireInteraction: true
+        };
+        
+        const notification = new Notification(title, options);
+        
+        // Auto-close after 10 seconds
+        setTimeout(() => notification.close(), 10000);
+        
+        // Handle notification clicks
+        notification.onclick = () => {
+            window.focus();
+            notification.close();
+        };
+    }
+    
+    // Show in-app toast notification
+    const toastMessage = `${symbol}: ${(changePercent * 100).toFixed(2)}% change to $${currentPrice.toFixed(2)}`;
+    showToast(toastMessage, 'info', 8000);
+    
+    // Add visual indicator in the price display if it's the current market
+    const currentSymbol = currentMarket?.replace('/', '-');
+    if (currentSymbol === symbol) {
+        const priceElement = document.querySelector('.price-display .price');
+        if (priceElement) {
+            priceElement.classList.add('price-alert');
+            setTimeout(() => priceElement.classList.remove('price-alert'), 3000);
+        }
+    }
+}
+
+// Handle stop order executed notifications
+function handleStopOrderExecuted(data) {
+    console.log('🛑 Stop order executed:', data);
+    
+    const { symbol, orderType, triggerPrice, executedPrice, quantity, side } = data;
+    
+    // Show browser notification
+    if ('Notification' in window && Notification.permission === 'granted') {
+        const title = `🛑 Stop Order Executed: ${symbol}`;
+        const orderTypeText = orderType === 'stop_loss' ? 'Stop Loss' : 'Take Profit';
+        const options = {
+            body: `${orderTypeText} ${side} order executed at $${executedPrice.toFixed(2)} (trigger: $${triggerPrice.toFixed(2)})`,
+            icon: '/favicon.ico',
+            tag: `stop-order-${symbol}`,
+            requireInteraction: true
+        };
+        
+        const notification = new Notification(title, options);
+        setTimeout(() => notification.close(), 15000);
+        
+        notification.onclick = () => {
+            window.focus();
+            // Navigate to trading page if not already there
+            if (window.location.pathname !== '/' && window.location.pathname !== '/index.html') {
+                window.location.href = '/';
+            }
+            notification.close();
+        };
+    }
+    
+    // Show prominent in-app notification
+    const orderTypeText = orderType === 'stop_loss' ? 'Stop Loss' : 'Take Profit';
+    const toastMessage = `${orderTypeText} executed for ${symbol} at $${executedPrice.toFixed(2)}`;
+    showToast(toastMessage, 'warning', 10000);
+    
+    // Clear stop order lines from chart when order is executed
+    removeStopLossLineFromChart();
+    removeTakeProfitLineFromChart();
+    resetStopOrderSettings();
+    
+    // Refresh positions if we're on the trading page
+    if (document.getElementById('trading-page') && document.getElementById('trading-page').style.display !== 'none') {
+        // Refresh user positions
+        refreshUserPositions();
+    }
+}
+
+// Request browser notification permission on page load
+function requestNotificationPermission() {
+    if ('Notification' in window) {
+        console.log('Current notification permission:', Notification.permission);
+        
+        if (Notification.permission === 'default') {
+            // Only request if permission hasn't been set yet
+            Notification.requestPermission().then(permission => {
+                console.log('Notification permission result:', permission);
+                if (permission === 'granted') {
+                    console.log('Browser notifications enabled');
+                    // Show a test notification
+                    showTestNotification();
+                } else {
+                    console.log('Browser notifications denied');
+                }
+            });
+        } else if (Notification.permission === 'granted') {
+            console.log('Browser notifications already enabled');
+            // Test notification removed to avoid annoyance
+        } else {
+            console.log('Browser notifications denied/blocked');
+        }
+    } else {
+        console.log('Browser does not support notifications');
+    }
+}
+
+// Show a test notification to verify it's working
+function showTestNotification() {
+    setTimeout(() => {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('CryptoSim Notifications Ready!', {
+                body: 'You will receive price alerts and trade notifications.',
+                icon: '/favicon.ico',
+                tag: 'test-notification'
+            });
+        }
+    }, 2000); // Show after 2 seconds
 }
 
 // Initialize TradingView Lightweight Chart with proper cleanup
@@ -987,6 +1160,8 @@ function initializeTradingViewChart() {
         candleSeries = null;
         lineSeries = null;
         volumeSeries = null;
+        stopLossLine = null;
+        takeProfitLine = null;
     }
     
     if (typeof window.LightweightCharts === 'undefined') {
@@ -1163,6 +1338,9 @@ function setupEventListeners() {
     // Close All positions button
     document.querySelector('.close-all-btn').addEventListener('click', closeAllPositions);
     
+    // Setup stop loss/take profit checkboxes
+    setupStopOrderEventListeners();
+    
     // Percentage buttons for selling
     document.querySelectorAll('.percentage-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -1176,6 +1354,13 @@ function setupEventListeners() {
         btn.addEventListener('click', (e) => {
             const market = e.target.dataset.market;
             selectMarket(market);
+            
+            // Switch to trade page
+            switchPage('trade');
+            
+            // Update navigation
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            document.querySelector('.nav-item[data-page="trade"]').classList.add('active');
         });
     });
     
@@ -1425,6 +1610,23 @@ function updatePrice(data) {
     
     // Update total assets
     updateUI();
+    
+    // Update current price references in stop orders
+    updateCurrentPriceReferences();
+    
+    // Recalculate stop order prices if they are enabled
+    try {
+        const stopLossCheckbox = document.getElementById('stop-loss-enabled');
+        const takeProfitCheckbox = document.getElementById('take-profit-enabled');
+        if (stopLossCheckbox && stopLossCheckbox.checked) {
+            calculateStopLossPrice();
+        }
+        if (takeProfitCheckbox && takeProfitCheckbox.checked) {
+            calculateTakeProfitPrice();
+        }
+    } catch (error) {
+        // Stop order calculations may fail if elements are not available, skip silently
+    }
     
     // Check pending orders for execution
     checkPendingOrders();
@@ -1990,7 +2192,7 @@ async function loadCandles(interval) {
                     const currentTimeUTC = Math.floor(Date.now() / 1000);
                     const utcDate = new Date(firstCandle.time * 1000);
                     const koreaDate = new Date(firstCandle.time * 1000).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-                    console.log('🕐 First candle timestamp debug:');
+                    console.log('First candle timestamp debug:');
                     console.log('   Raw timestamp:', firstCandle.time);
                     console.log('   Current UTC timestamp:', currentTimeUTC);
                     console.log('   UTC Date:', utcDate.toISOString());
@@ -2260,8 +2462,8 @@ function updateRealtimeCandleData(newCandleData) {
         
         console.log('Real-time candle update via WebSocket:', newCandle);
         console.log('Volume value:', newCandle.volume, typeof newCandle.volume);
-        console.log('🔍 volumeSeries status:', !!volumeSeries, typeof volumeSeries);
-        console.log('🕐 Time values check:', {
+        console.log('volumeSeries status:', !!volumeSeries, typeof volumeSeries);
+        console.log('Time values check:', {
             newTime: newCandle.time,
             newTimeType: typeof newCandle.time,
             rawTime: newCandleData.time,
@@ -2312,7 +2514,7 @@ function updateRealtimeCandleData(newCandleData) {
         
         if (isNewCandle) {
             // 새로운 1분봉 시작 - 새 캔들 추가
-            console.log('🆕 NEW CANDLE detected - adding to chart with volume:', newCandle.volume);
+            console.log('NEW CANDLE detected - adding to chart with volume:', newCandle.volume);
             candleData.push(newCandle);
             candleIndex = candleData.length - 1;
             candleToUpdate = newCandle;
@@ -2325,7 +2527,7 @@ function updateRealtimeCandleData(newCandleData) {
                     value: newCandle.volume || 0,
                     color: isUp ? '#00d68f' : '#ff5a5f'
                 };
-                console.log('🆕 Adding new volume bar:', volumeData);
+                console.log('Adding new volume bar:', volumeData);
                 volumeSeries.update(volumeData);
             }
         } else {
@@ -2593,10 +2795,103 @@ function updateRealtimeCandleData(newCandleData) {
         // Update current price
         currentPrice = newCandle.close;
         
+        // Update indicators with real-time data
+        updateIndicatorsRealtime();
+        
         console.log(`[${funcTimestamp}] updateRealtimeCandleData COMPLETED successfully`);
         
     } catch (error) {
         console.error(`❌ [${funcTimestamp}] Error updating real-time candle:`, error);
+    }
+}
+
+// Update indicators with real-time data
+function updateIndicatorsRealtime() {
+    try {
+        if (!candleData || candleData.length === 0) {
+            return;
+        }
+        
+        // Update MA (Moving Average)
+        if (indicators.ma) {
+            const maData = calculateMA(candleData, indicatorSettings.ma.period);
+            if (maData && maData.length > 0) {
+                const lastMA = maData[maData.length - 1];
+                indicators.ma.update(lastMA);
+            }
+        }
+        
+        // Update EMA (Exponential Moving Average)
+        if (indicators.ema) {
+            const emaData = calculateEMA(candleData, indicatorSettings.ema.period);
+            if (emaData && emaData.length > 0) {
+                const lastEMA = emaData[emaData.length - 1];
+                indicators.ema.update(lastEMA);
+            }
+        }
+        
+        // Update Bollinger Bands
+        if (indicators.bollinger.upper) {
+            const bbData = calculateBollingerBands(candleData, indicatorSettings.bollinger.period, indicatorSettings.bollinger.std);
+            if (bbData) {
+                if (bbData.upper && bbData.upper.length > 0) {
+                    indicators.bollinger.upper.update(bbData.upper[bbData.upper.length - 1]);
+                }
+                if (bbData.middle && bbData.middle.length > 0) {
+                    indicators.bollinger.middle.update(bbData.middle[bbData.middle.length - 1]);
+                }
+                if (bbData.lower && bbData.lower.length > 0) {
+                    indicators.bollinger.lower.update(bbData.lower[bbData.lower.length - 1]);
+                }
+            }
+        }
+        
+        // Update RSI
+        if (indicators.rsi) {
+            const rsiData = calculateRSI(candleData, indicatorSettings.rsi.period);
+            if (rsiData && rsiData.length > 0) {
+                const lastRSI = rsiData[rsiData.length - 1];
+                indicators.rsi.update(lastRSI);
+            }
+        }
+        
+        // Update MACD
+        if (indicators.macd.macd) {
+            const macdData = calculateMACD(candleData, 
+                indicatorSettings.macd.fast, 
+                indicatorSettings.macd.slow, 
+                indicatorSettings.macd.signal);
+            if (macdData) {
+                if (macdData.macd && macdData.macd.length > 0) {
+                    indicators.macd.macd.update(macdData.macd[macdData.macd.length - 1]);
+                }
+                if (macdData.signal && macdData.signal.length > 0) {
+                    indicators.macd.signal.update(macdData.signal[macdData.signal.length - 1]);
+                }
+                if (macdData.histogram && macdData.histogram.length > 0) {
+                    indicators.macd.histogram.update(macdData.histogram[macdData.histogram.length - 1]);
+                }
+            }
+        }
+        
+        // Update Stochastic
+        if (indicators.stochastic.k) {
+            const stochData = calculateStochastic(candleData, 
+                indicatorSettings.stochastic.k, 
+                indicatorSettings.stochastic.d, 
+                indicatorSettings.stochastic.smooth);
+            if (stochData) {
+                if (stochData.k && stochData.k.length > 0) {
+                    indicators.stochastic.k.update(stochData.k[stochData.k.length - 1]);
+                }
+                if (stochData.d && stochData.d.length > 0) {
+                    indicators.stochastic.d.update(stochData.d[stochData.d.length - 1]);
+                }
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error updating indicators:', error);
     }
 }
 
@@ -2687,7 +2982,7 @@ function updateRealtimeCandle(price) {
         
         // Only log debug info if there's an issue or when creating new candles
         if (shouldCreateNewCandle || timeSinceLastCandle < 0) {
-            console.log('🕐 Candle time calculation debug:');
+            console.log('Candle time calculation debug:');
             console.log('   Current real time:', nowDate);
             console.log('   Last candle time:', lastCandle.time, '(seconds) →', lastCandleDate);
             console.log('   Time since last candle:', timeSinceLastCandle, 'seconds');
@@ -2698,7 +2993,7 @@ function updateRealtimeCandle(price) {
         // Check if we need to create a new candle or update existing one  
         if (shouldCreateNewCandle) {
             // Create new candle for new time period
-            console.log('🆕 Creating new candle for time:', candleTime);
+            console.log('Creating new candle for time:', candleTime);
             const newCandle = {
                 time: candleTime,
                 open: price,
@@ -3582,8 +3877,804 @@ function executeSell() {
     playTradingSound('sell');
 }
 
+// Setup stop order event listeners
+function setupStopOrderEventListeners() {
+    // Update current price references
+    updateCurrentPriceReferences();
+    
+    // Setup checkbox handlers
+    setupStopOrderCheckboxes();
+    
+    // Setup method tabs
+    setupMethodTabs();
+    
+    // Setup range sliders
+    setupRangeSliders();
+    
+    // Setup price inputs
+    setupPriceInputs();
+}
+
+function updateCurrentPriceReferences() {
+    const stopLossCurrent = document.getElementById('stop-loss-current');
+    const takeProfitCurrent = document.getElementById('take-profit-current');
+    
+    if (stopLossCurrent && currentPrice) {
+        stopLossCurrent.textContent = `Current: $${currentPrice.toFixed(2)}`;
+    }
+    if (takeProfitCurrent && currentPrice) {
+        takeProfitCurrent.textContent = `Current: $${currentPrice.toFixed(2)}`;
+    }
+}
+
+function setupStopOrderCheckboxes() {
+    const stopLossCheckbox = document.getElementById('stop-loss-enabled');
+    const takeProfitCheckbox = document.getElementById('take-profit-enabled');
+    const stopLossInputs = document.getElementById('stop-loss-inputs');
+    const takeProfitInputs = document.getElementById('take-profit-inputs');
+    
+    if (stopLossCheckbox && stopLossInputs) {
+        stopLossCheckbox.addEventListener('change', (e) => {
+            stopLossInputs.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) {
+                updateCurrentPriceReferences();
+                calculateStopLossPrice();
+            } else {
+                removeStopLossLineFromChart();
+            }
+        });
+    }
+    
+    if (takeProfitCheckbox && takeProfitInputs) {
+        takeProfitCheckbox.addEventListener('change', (e) => {
+            takeProfitInputs.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) {
+                updateCurrentPriceReferences();
+                calculateTakeProfitPrice();
+            } else {
+                removeTakeProfitLineFromChart();
+            }
+        });
+    }
+}
+
+function setupMethodTabs() {
+    document.querySelectorAll('.method-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            const method = e.target.dataset.method;
+            const type = e.target.dataset.type;
+            
+            // Update active tab
+            const tabContainer = e.target.parentNode;
+            tabContainer.querySelectorAll('.method-tab').forEach(t => t.classList.remove('active'));
+            e.target.classList.add('active');
+            
+            // Show/hide content
+            const contentContainer = tabContainer.nextElementSibling.parentNode;
+            contentContainer.querySelectorAll('.method-content').forEach(c => c.classList.remove('active'));
+            const targetContent = contentContainer.querySelector(`.${method}-method`);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+            
+            // Recalculate when switching methods
+            if (type === 'stop-loss') {
+                calculateStopLossPrice();
+            } else if (type === 'take-profit') {
+                calculateTakeProfitPrice();
+            }
+        });
+    });
+}
+
+function setupRangeSliders() {
+    const stopLossSlider = document.getElementById('stop-loss-percent-slider');
+    const takeProfitSlider = document.getElementById('take-profit-percent-slider');
+    
+    if (stopLossSlider) {
+        stopLossSlider.addEventListener('input', (e) => {
+            const percent = e.target.value;
+            document.getElementById('stop-loss-percent-value').textContent = percent;
+            calculateStopLossPrice();
+        });
+    }
+    
+    if (takeProfitSlider) {
+        takeProfitSlider.addEventListener('input', (e) => {
+            const percent = e.target.value;
+            document.getElementById('take-profit-percent-value').textContent = percent;
+            calculateTakeProfitPrice();
+        });
+    }
+}
+
+function setupPriceInputs() {
+    const stopLossPrice = document.getElementById('stop-loss-price');
+    const takeProfitPrice = document.getElementById('take-profit-price');
+    
+    if (stopLossPrice) {
+        stopLossPrice.addEventListener('input', () => {
+            calculateStopLossPercent();
+        });
+    }
+    
+    if (takeProfitPrice) {
+        takeProfitPrice.addEventListener('input', () => {
+            calculateTakeProfitPercent();
+        });
+    }
+}
+
+function calculateStopLossPrice() {
+    if (!currentPrice) return;
+    
+    const percentValue = document.getElementById('stop-loss-percent-value');
+    const calculatedElement = document.getElementById('stop-loss-calculated');
+    
+    if (percentValue && calculatedElement) {
+        const percent = parseFloat(percentValue.textContent);
+        const price = currentPrice * (1 - percent / 100);
+        calculatedElement.textContent = price.toFixed(2);
+        
+        // Also update the price input if in percent mode
+        const percentMethod = document.querySelector('.stop-loss-card .percent-method');
+        if (percentMethod && percentMethod.classList.contains('active')) {
+            const priceInput = document.getElementById('stop-loss-price');
+            if (priceInput) {
+                priceInput.value = price.toFixed(2);
+            }
+        }
+        
+        // Update chart line
+        updatePositionStopOrderLines();
+    }
+}
+
+function calculateTakeProfitPrice() {
+    if (!currentPrice) return;
+    
+    const percentValue = document.getElementById('take-profit-percent-value');
+    const calculatedElement = document.getElementById('take-profit-calculated');
+    
+    if (percentValue && calculatedElement) {
+        const percent = parseFloat(percentValue.textContent);
+        const price = currentPrice * (1 + percent / 100);
+        calculatedElement.textContent = price.toFixed(2);
+        
+        // Also update the price input if in percent mode
+        const percentMethod = document.querySelector('.take-profit-card .percent-method');
+        if (percentMethod && percentMethod.classList.contains('active')) {
+            const priceInput = document.getElementById('take-profit-price');
+            if (priceInput) {
+                priceInput.value = price.toFixed(2);
+            }
+        }
+        
+        // Update chart line
+        updatePositionStopOrderLines();
+    }
+}
+
+function calculateStopLossPercent() {
+    if (!currentPrice) return;
+    
+    const priceInput = document.getElementById('stop-loss-price');
+    const calculatedPercent = document.getElementById('stop-loss-calculated-percent');
+    
+    if (priceInput && calculatedPercent) {
+        const price = parseFloat(priceInput.value);
+        if (price && price > 0) {
+            const percent = ((currentPrice - price) / currentPrice) * 100;
+            calculatedPercent.textContent = percent.toFixed(2);
+            
+            // Also update slider if in price mode
+            const priceMethod = document.querySelector('.stop-loss-card .price-method');
+            if (priceMethod && priceMethod.classList.contains('active')) {
+                const slider = document.getElementById('stop-loss-percent-slider');
+                const percentValue = document.getElementById('stop-loss-percent-value');
+                if (slider && percentValue && percent > 0 && percent <= 50) {
+                    slider.value = percent.toFixed(0);
+                    percentValue.textContent = percent.toFixed(0);
+                }
+            }
+        } else {
+            calculatedPercent.textContent = '0';
+        }
+        
+        // Update chart line
+        updatePositionStopOrderLines();
+    }
+}
+
+function calculateTakeProfitPercent() {
+    if (!currentPrice) return;
+    
+    const priceInput = document.getElementById('take-profit-price');
+    const calculatedPercent = document.getElementById('take-profit-calculated-percent');
+    
+    if (priceInput && calculatedPercent) {
+        const price = parseFloat(priceInput.value);
+        if (price && price > 0) {
+            const percent = ((price - currentPrice) / currentPrice) * 100;
+            calculatedPercent.textContent = percent.toFixed(2);
+            
+            // Also update slider if in price mode
+            const priceMethod = document.querySelector('.take-profit-card .price-method');
+            if (priceMethod && priceMethod.classList.contains('active')) {
+                const slider = document.getElementById('take-profit-percent-slider');
+                const percentValue = document.getElementById('take-profit-percent-value');
+                if (slider && percentValue && percent > 0 && percent <= 100) {
+                    slider.value = percent.toFixed(0);
+                    percentValue.textContent = percent.toFixed(0);
+                }
+            }
+        } else {
+            calculatedPercent.textContent = '0';
+        }
+        
+        // Update chart line
+        updatePositionStopOrderLines();
+    }
+}
+
+// Chart stop order line management
+function addStopLossLineToChart(price) {
+    if (!chart || !price || price <= 0) return;
+    
+    // Remove existing stop loss line
+    removeStopLossLineFromChart();
+    
+    try {
+        stopLossLine = {
+            price: price,
+            color: '#ef4444',
+            lineWidth: 2,
+            lineStyle: 1, // Dotted
+            axisLabelVisible: true,
+            title: `Loss: $${price.toFixed(2)}`,
+        };
+        
+        // Add price line to chart
+        if (candleSeries) {
+            candleSeries.createPriceLine(stopLossLine);
+        }
+        
+        console.log('Stop loss line added to chart at:', price);
+    } catch (error) {
+        console.error('Error adding stop loss line:', error);
+    }
+}
+
+function addTakeProfitLineToChart(price) {
+    if (!chart || !price || price <= 0) return;
+    
+    // Remove existing take profit line
+    removeTakeProfitLineFromChart();
+    
+    try {
+        takeProfitLine = {
+            price: price,
+            color: '#10b981',
+            lineWidth: 2,
+            lineStyle: 1, // Dotted
+            axisLabelVisible: true,
+            title: `Profit: $${price.toFixed(2)}`,
+        };
+        
+        // Add price line to chart
+        if (candleSeries) {
+            candleSeries.createPriceLine(takeProfitLine);
+        }
+        
+        console.log('Take profit line added to chart at:', price);
+    } catch (error) {
+        console.error('Error adding take profit line:', error);
+    }
+}
+
+function removeStopLossLineFromChart() {
+    if (stopLossLine && candleSeries) {
+        try {
+            candleSeries.removePriceLine(stopLossLine);
+            console.log('Stop loss line removed from chart');
+        } catch (error) {
+            console.error('Error removing stop loss line:', error);
+        }
+    }
+    stopLossLine = null;
+}
+
+function removeTakeProfitLineFromChart() {
+    if (takeProfitLine && candleSeries) {
+        try {
+            candleSeries.removePriceLine(takeProfitLine);
+            console.log('Take profit line removed from chart');
+        } catch (error) {
+            console.error('Error removing take profit line:', error);
+        }
+    }
+    takeProfitLine = null;
+}
+
+function updateStopOrderLinesOnChart() {
+    // Only show lines if there are active leverage positions
+    if (!leveragePositions || leveragePositions.length === 0) {
+        removeStopLossLineFromChart();
+        removeTakeProfitLineFromChart();
+        return;
+    }
+    
+    const stopLossCheckbox = document.getElementById('stop-loss-enabled');
+    const takeProfitCheckbox = document.getElementById('take-profit-enabled');
+    const stopLossPrice = document.getElementById('stop-loss-price');
+    const takeProfitPrice = document.getElementById('take-profit-price');
+    
+    // Update stop loss line only if positions exist
+    if (stopLossCheckbox && stopLossCheckbox.checked && stopLossPrice && stopLossPrice.value) {
+        const price = parseFloat(stopLossPrice.value);
+        if (price > 0) {
+            addStopLossLineToChart(price);
+        }
+    } else {
+        removeStopLossLineFromChart();
+    }
+    
+    // Update take profit line only if positions exist
+    if (takeProfitCheckbox && takeProfitCheckbox.checked && takeProfitPrice && takeProfitPrice.value) {
+        const price = parseFloat(takeProfitPrice.value);
+        if (price > 0) {
+            addTakeProfitLineToChart(price);
+        }
+    } else {
+        removeTakeProfitLineFromChart();
+    }
+}
+
+function resetStopOrderSettings() {
+    // Reset checkboxes
+    const stopLossCheckbox = document.getElementById('stop-loss-enabled');
+    const takeProfitCheckbox = document.getElementById('take-profit-enabled');
+    
+    if (stopLossCheckbox) {
+        stopLossCheckbox.checked = false;
+    }
+    if (takeProfitCheckbox) {
+        takeProfitCheckbox.checked = false;
+    }
+    
+    // Hide input panels
+    const stopLossInputs = document.getElementById('stop-loss-inputs');
+    const takeProfitInputs = document.getElementById('take-profit-inputs');
+    
+    if (stopLossInputs) {
+        stopLossInputs.style.display = 'none';
+    }
+    if (takeProfitInputs) {
+        takeProfitInputs.style.display = 'none';
+    }
+    
+    // Reset price inputs
+    const stopLossPrice = document.getElementById('stop-loss-price');
+    const takeProfitPrice = document.getElementById('take-profit-price');
+    
+    if (stopLossPrice) {
+        stopLossPrice.value = '';
+    }
+    if (takeProfitPrice) {
+        takeProfitPrice.value = '';
+    }
+    
+    // Reset sliders to default values
+    const stopLossSlider = document.getElementById('stop-loss-percent-slider');
+    const takeProfitSlider = document.getElementById('take-profit-percent-slider');
+    
+    if (stopLossSlider) {
+        stopLossSlider.value = 10;
+        const percentValue = document.getElementById('stop-loss-percent-value');
+        if (percentValue) percentValue.textContent = '10';
+    }
+    
+    if (takeProfitSlider) {
+        takeProfitSlider.value = 20;
+        const percentValue = document.getElementById('take-profit-percent-value');
+        if (percentValue) percentValue.textContent = '20';
+    }
+    
+    // Reset calculated displays
+    const stopLossCalculated = document.getElementById('stop-loss-calculated');
+    const takeProfitCalculated = document.getElementById('take-profit-calculated');
+    const stopLossCalculatedPercent = document.getElementById('stop-loss-calculated-percent');
+    const takeProfitCalculatedPercent = document.getElementById('take-profit-calculated-percent');
+    
+    if (stopLossCalculated) stopLossCalculated.textContent = '0';
+    if (takeProfitCalculated) takeProfitCalculated.textContent = '0';
+    if (stopLossCalculatedPercent) stopLossCalculatedPercent.textContent = '0';
+    if (takeProfitCalculatedPercent) takeProfitCalculatedPercent.textContent = '0';
+    
+    console.log('Stop order settings reset');
+}
+
+// Position-specific stop orders modal management
+let currentEditingPosition = null;
+
+function openPositionStopModal(positionId) {
+    const position = leveragePositions.find(p => p.id === positionId);
+    if (!position) return;
+    
+    currentEditingPosition = position;
+    const modal = document.getElementById('position-stop-modal');
+    
+    // Populate position info
+    const positionInfo = document.getElementById('position-info-summary');
+    positionInfo.innerHTML = `
+        <div><span class="position-type ${position.type}">${position.type.toUpperCase()}</span> ${position.leverage}x | ${position.market || 'BTC/USDT'}</div>
+        <div>Entry: $${position.entryPrice.toFixed(2)} | Size: $${position.size.toFixed(2)}</div>
+    `;
+    
+    // Update current price references
+    const currentMarketPrice = marketPrices[position.market] || currentPrice;
+    document.getElementById('modal-stop-loss-current').textContent = `Current: $${currentMarketPrice.toFixed(2)}`;
+    document.getElementById('modal-take-profit-current').textContent = `Current: $${currentMarketPrice.toFixed(2)}`;
+    
+    // Load existing stop order settings
+    if (position.stopLoss && position.stopLoss.enabled) {
+        document.getElementById('modal-stop-loss-enabled').checked = true;
+        document.getElementById('modal-stop-loss-price').value = position.stopLoss.price;
+        document.getElementById('modal-stop-loss-inputs').classList.remove('hidden');
+        calculateModalStopLossPercent();
+    } else {
+        document.getElementById('modal-stop-loss-enabled').checked = false;
+        document.getElementById('modal-stop-loss-inputs').classList.add('hidden');
+    }
+    
+    if (position.takeProfit && position.takeProfit.enabled) {
+        document.getElementById('modal-take-profit-enabled').checked = true;
+        document.getElementById('modal-take-profit-price').value = position.takeProfit.price;
+        document.getElementById('modal-take-profit-inputs').classList.remove('hidden');
+        calculateModalTakeProfitPercent();
+    } else {
+        document.getElementById('modal-take-profit-enabled').checked = false;
+        document.getElementById('modal-take-profit-inputs').classList.add('hidden');
+    }
+    
+    // Setup modal event listeners
+    setupModalStopOrderEventListeners();
+    
+    // Show modal
+    modal.classList.add('active');
+}
+
+function closePositionStopModal() {
+    const modal = document.getElementById('position-stop-modal');
+    modal.classList.remove('active');
+    currentEditingPosition = null;
+}
+
+function setupModalStopOrderEventListeners() {
+    // Remove existing listeners first to prevent duplicates
+    const elements = [
+        'modal-stop-loss-enabled',
+        'modal-take-profit-enabled',
+        'modal-stop-loss-percent-slider',
+        'modal-take-profit-percent-slider',
+        'modal-stop-loss-price',
+        'modal-take-profit-price'
+    ];
+    
+    elements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            // Clone element to remove all event listeners
+            const newElement = element.cloneNode(true);
+            element.parentNode.replaceChild(newElement, element);
+        }
+    });
+    
+    // Setup checkbox handlers
+    const stopLossCheckbox = document.getElementById('modal-stop-loss-enabled');
+    const takeProfitCheckbox = document.getElementById('modal-take-profit-enabled');
+    
+    if (stopLossCheckbox) {
+        stopLossCheckbox.addEventListener('change', (e) => {
+            const inputs = document.getElementById('modal-stop-loss-inputs');
+            if (e.target.checked) {
+                inputs.classList.remove('hidden');
+            } else {
+                inputs.classList.add('hidden');
+            }
+            if (e.target.checked) {
+                calculateModalStopLossPrice();
+            }
+        });
+    }
+    
+    if (takeProfitCheckbox) {
+        takeProfitCheckbox.addEventListener('change', (e) => {
+            const inputs = document.getElementById('modal-take-profit-inputs');
+            if (e.target.checked) {
+                inputs.classList.remove('hidden');
+            } else {
+                inputs.classList.add('hidden');
+            }
+            if (e.target.checked) {
+                calculateModalTakeProfitPrice();
+            }
+        });
+    }
+    
+    // Setup sliders
+    const stopLossSlider = document.getElementById('modal-stop-loss-percent-slider');
+    const takeProfitSlider = document.getElementById('modal-take-profit-percent-slider');
+    
+    if (stopLossSlider) {
+        stopLossSlider.addEventListener('input', (e) => {
+            document.getElementById('modal-stop-loss-percent-value').textContent = e.target.value;
+            calculateModalStopLossPrice();
+        });
+    }
+    
+    if (takeProfitSlider) {
+        takeProfitSlider.addEventListener('input', (e) => {
+            document.getElementById('modal-take-profit-percent-value').textContent = e.target.value;
+            calculateModalTakeProfitPrice();
+        });
+    }
+    
+    // Setup price inputs
+    const stopLossPrice = document.getElementById('modal-stop-loss-price');
+    const takeProfitPrice = document.getElementById('modal-take-profit-price');
+    
+    if (stopLossPrice) {
+        stopLossPrice.addEventListener('input', calculateModalStopLossPercent);
+    }
+    
+    if (takeProfitPrice) {
+        takeProfitPrice.addEventListener('input', calculateModalTakeProfitPercent);
+    }
+    
+    // Setup method tabs
+    document.querySelectorAll('.position-stop-modal .method-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            const method = e.target.dataset.method;
+            const type = e.target.dataset.type;
+            
+            // Update active tab
+            const tabContainer = e.target.parentNode;
+            tabContainer.querySelectorAll('.method-tab').forEach(t => t.classList.remove('active'));
+            e.target.classList.add('active');
+            
+            // Show/hide content
+            const contentContainer = tabContainer.nextElementSibling.parentNode;
+            contentContainer.querySelectorAll('.method-content').forEach(c => c.classList.remove('active'));
+            const targetContent = contentContainer.querySelector(`.${method}-method`);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+            
+            // Recalculate when switching methods
+            if (type === 'modal-stop-loss') {
+                calculateModalStopLossPrice();
+            } else if (type === 'modal-take-profit') {
+                calculateModalTakeProfitPrice();
+            }
+        });
+    });
+}
+
+function calculateModalStopLossPrice() {
+    if (!currentEditingPosition) return;
+    
+    const currentMarketPrice = marketPrices[currentEditingPosition.market] || currentPrice;
+    const percentValue = document.getElementById('modal-stop-loss-percent-value');
+    const calculatedElement = document.getElementById('modal-stop-loss-calculated');
+    
+    if (percentValue && calculatedElement && currentMarketPrice) {
+        const percent = parseFloat(percentValue.textContent);
+        const price = currentMarketPrice * (1 - percent / 100);
+        calculatedElement.textContent = price.toFixed(2);
+        
+        // Also update the price input if in percent mode
+        const percentMethod = document.querySelector('.position-stop-modal .stop-loss-card .percent-method');
+        if (percentMethod && percentMethod.classList.contains('active')) {
+            const priceInput = document.getElementById('modal-stop-loss-price');
+            if (priceInput) {
+                priceInput.value = price.toFixed(2);
+            }
+        }
+    }
+}
+
+function calculateModalTakeProfitPrice() {
+    if (!currentEditingPosition) return;
+    
+    const currentMarketPrice = marketPrices[currentEditingPosition.market] || currentPrice;
+    const percentValue = document.getElementById('modal-take-profit-percent-value');
+    const calculatedElement = document.getElementById('modal-take-profit-calculated');
+    
+    if (percentValue && calculatedElement && currentMarketPrice) {
+        const percent = parseFloat(percentValue.textContent);
+        const price = currentMarketPrice * (1 + percent / 100);
+        calculatedElement.textContent = price.toFixed(2);
+        
+        // Also update the price input if in percent mode
+        const percentMethod = document.querySelector('.position-stop-modal .take-profit-card .percent-method');
+        if (percentMethod && percentMethod.classList.contains('active')) {
+            const priceInput = document.getElementById('modal-take-profit-price');
+            if (priceInput) {
+                priceInput.value = price.toFixed(2);
+            }
+        }
+    }
+}
+
+function calculateModalStopLossPercent() {
+    if (!currentEditingPosition) return;
+    
+    const currentMarketPrice = marketPrices[currentEditingPosition.market] || currentPrice;
+    const priceInput = document.getElementById('modal-stop-loss-price');
+    const calculatedPercent = document.getElementById('modal-stop-loss-calculated-percent');
+    
+    if (priceInput && calculatedPercent && currentMarketPrice) {
+        const price = parseFloat(priceInput.value);
+        if (price && price > 0) {
+            const percent = ((currentMarketPrice - price) / currentMarketPrice) * 100;
+            calculatedPercent.textContent = percent.toFixed(2);
+        } else {
+            calculatedPercent.textContent = '0';
+        }
+    }
+}
+
+function calculateModalTakeProfitPercent() {
+    if (!currentEditingPosition) return;
+    
+    const currentMarketPrice = marketPrices[currentEditingPosition.market] || currentPrice;
+    const priceInput = document.getElementById('modal-take-profit-price');
+    const calculatedPercent = document.getElementById('modal-take-profit-calculated-percent');
+    
+    if (priceInput && calculatedPercent && currentMarketPrice) {
+        const price = parseFloat(priceInput.value);
+        if (price && price > 0) {
+            const percent = ((price - currentMarketPrice) / currentMarketPrice) * 100;
+            calculatedPercent.textContent = percent.toFixed(2);
+        } else {
+            calculatedPercent.textContent = '0';
+        }
+    }
+}
+
+async function savePositionStopOrders() {
+    if (!currentEditingPosition) return;
+    
+    const stopLossEnabled = document.getElementById('modal-stop-loss-enabled').checked;
+    const takeProfitEnabled = document.getElementById('modal-take-profit-enabled').checked;
+    const stopLossPrice = parseFloat(document.getElementById('modal-stop-loss-price').value);
+    const takeProfitPrice = parseFloat(document.getElementById('modal-take-profit-price').value);
+    
+    // Validate inputs
+    if (stopLossEnabled && (!stopLossPrice || stopLossPrice <= 0)) {
+        showToast('Please enter valid stop loss price', 'error');
+        return;
+    }
+    
+    if (takeProfitEnabled && (!takeProfitPrice || takeProfitPrice <= 0)) {
+        showToast('Please enter valid take profit price', 'error');
+        return;
+    }
+    
+    try {
+        // Update position data
+        currentEditingPosition.stopLoss = stopLossEnabled ? {
+            enabled: true,
+            price: stopLossPrice,
+            orderId: currentEditingPosition.stopLoss?.orderId || null
+        } : null;
+        
+        currentEditingPosition.takeProfit = takeProfitEnabled ? {
+            enabled: true,
+            price: takeProfitPrice,
+            orderId: currentEditingPosition.takeProfit?.orderId || null
+        } : null;
+        
+        // Save to server
+        const token = localStorage.getItem('token');
+        if (token) {
+            // Create or update stop orders on server
+            if (stopLossEnabled) {
+                await fetch('/api/stop-orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        market: currentEditingPosition.market,
+                        position_type: currentEditingPosition.type,
+                        order_type: 'stop_loss',
+                        trigger_price: stopLossPrice,
+                        amount: currentEditingPosition.size,
+                        leverage: currentEditingPosition.leverage || 1
+                    })
+                });
+            }
+            
+            if (takeProfitEnabled) {
+                await fetch('/api/stop-orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        market: currentEditingPosition.market,
+                        position_type: currentEditingPosition.type,
+                        order_type: 'take_profit',
+                        trigger_price: takeProfitPrice,
+                        amount: currentEditingPosition.size,
+                        leverage: currentEditingPosition.leverage || 1
+                    })
+                });
+            }
+        }
+        
+        // Update UI
+        updateLeveragePositionsDisplay();
+        updatePositionStopOrderLines();
+        saveUserData();
+        
+        showToast('Stop orders saved successfully', 'success');
+        closePositionStopModal();
+        
+    } catch (error) {
+        console.error('Error saving stop orders:', error);
+        showToast('Failed to save stop orders', 'error');
+    }
+}
+
+function updatePositionStopOrderLines() {
+    // Remove all existing lines first
+    removeStopLossLineFromChart();
+    removeTakeProfitLineFromChart();
+    
+    // Show lines for positions with active stop orders
+    leveragePositions.forEach(position => {
+        if (position.stopLoss && position.stopLoss.enabled) {
+            addStopLossLineToChart(position.stopLoss.price);
+        }
+        if (position.takeProfit && position.takeProfit.enabled) {
+            addTakeProfitLineToChart(position.takeProfit.price);
+        }
+    });
+}
+
+function setupPositionStopModalEventListeners() {
+    // Stop orders button click (delegated event listener)
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('stop-orders-btn') || 
+            e.target.closest('.stop-orders-btn')) {
+            const button = e.target.closest('.stop-orders-btn') || e.target;
+            const positionId = parseInt(button.dataset.positionId);
+            openPositionStopModal(positionId);
+        }
+    });
+    
+    // Modal close buttons
+    document.getElementById('modal-close-btn')?.addEventListener('click', closePositionStopModal);
+    document.getElementById('cancel-stop-orders')?.addEventListener('click', closePositionStopModal);
+    
+    // Save button
+    document.getElementById('save-stop-orders')?.addEventListener('click', savePositionStopOrders);
+    
+    // Click outside modal to close
+    document.getElementById('position-stop-modal')?.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) {
+            closePositionStopModal();
+        }
+    });
+}
+
 // Open leverage position
-function openLeveragePosition() {
+async function openLeveragePosition() {
     const amount = parseFloat(document.getElementById('leverage-amount').value);
     const leverage = parseInt(document.getElementById('leverage-select').value);
     const positionTypeElement = document.querySelector('.position-btn.active');
@@ -3620,6 +4711,43 @@ function openLeveragePosition() {
         const safeAmount = Number.isFinite(amount) ? amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
         const safeOpeningFee = Number.isFinite(openingFee) ? openingFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00';
         showToast(`Insufficient balance (Margin $${safeAmount} + Fee $${safeOpeningFee})`, 'error');
+        return;
+    }
+    
+    // Check for stop loss/take profit settings
+    const stopLossEnabled = document.getElementById('stop-loss-enabled')?.checked;
+    const takeProfitEnabled = document.getElementById('take-profit-enabled')?.checked;
+    const stopLossPrice = parseFloat(document.getElementById('stop-loss-price')?.value);
+    const takeProfitPrice = parseFloat(document.getElementById('take-profit-price')?.value);
+    
+    // Validate stop orders
+    if (stopLossEnabled && (!stopLossPrice || stopLossPrice <= 0)) {
+        showToast('Please enter valid stop loss price', 'error');
+        return;
+    }
+    
+    if (takeProfitEnabled && (!takeProfitPrice || takeProfitPrice <= 0)) {
+        showToast('Please enter valid take profit price', 'error');
+        return;
+    }
+    
+    if (stopLossEnabled && positionType === 'long' && stopLossPrice >= currentPrice) {
+        showToast('Stop loss must be below current price for long position', 'error');
+        return;
+    }
+    
+    if (stopLossEnabled && positionType === 'short' && stopLossPrice <= currentPrice) {
+        showToast('Stop loss must be above current price for short position', 'error');
+        return;
+    }
+    
+    if (takeProfitEnabled && positionType === 'long' && takeProfitPrice <= currentPrice) {
+        showToast('Take profit must be above current price for long position', 'error');
+        return;
+    }
+    
+    if (takeProfitEnabled && positionType === 'short' && takeProfitPrice >= currentPrice) {
+        showToast('Take profit must be below current price for short position', 'error');
         return;
     }
     
@@ -3676,7 +4804,18 @@ function openLeveragePosition() {
             tradingFeeRate: tradingFee,
             pnl: -openingFee, // Start with negative P&L due to opening fee
             pnlPercent: 0,
-            time: new Date().toISOString()
+            time: new Date().toISOString(),
+            // Store individual stop order settings for this position
+            stopLoss: stopLossEnabled ? {
+                enabled: true,
+                price: stopLossPrice,
+                orderId: null // Will be set when server creates the order
+            } : null,
+            takeProfit: takeProfitEnabled ? {
+                enabled: true,
+                price: takeProfitPrice,
+                orderId: null // Will be set when server creates the order
+            } : null
         };
         
         // Check max positions limit
@@ -3686,7 +4825,60 @@ function openLeveragePosition() {
         }
         
         leveragePositions.push(position);
-        showToast(`🚀 ${positionType.toUpperCase()} position opened: $${positionSize.toFixed(2)} (${leverage}x)`, 'success');
+        
+        // Create stop orders if enabled
+        const token = localStorage.getItem('token');
+        if (stopLossEnabled && stopLossPrice && token) {
+            try {
+                await fetch('/api/stop-orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        market: currentMarket,
+                        position_type: positionType,
+                        order_type: 'stop_loss',
+                        trigger_price: stopLossPrice,
+                        amount: positionSize,
+                        leverage: leverage
+                    })
+                });
+            } catch (error) {
+                console.error('Failed to create stop loss order:', error);
+            }
+        }
+        
+        if (takeProfitEnabled && takeProfitPrice && token) {
+            try {
+                await fetch('/api/stop-orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        market: currentMarket,
+                        position_type: positionType,
+                        order_type: 'take_profit',
+                        trigger_price: takeProfitPrice,
+                        amount: positionSize,
+                        leverage: leverage
+                    })
+                });
+            } catch (error) {
+                console.error('Failed to create take profit order:', error);
+            }
+        }
+        
+        let toastMessage = `${positionType.toUpperCase()} position opened: $${positionSize.toFixed(2)} (${leverage}x)`;
+        if (stopLossEnabled || takeProfitEnabled) {
+            toastMessage += '\n';
+            if (stopLossEnabled) toastMessage += `SL: $${stopLossPrice.toFixed(2)} `;
+            if (takeProfitEnabled) toastMessage += `TP: $${takeProfitPrice.toFixed(2)}`;
+        }
+        showToast(toastMessage, 'success');
         
         // Play leverage sound
         playTradingSound('leverage');
@@ -3704,6 +4896,16 @@ function openLeveragePosition() {
     // Clear input and reset fee display
     document.getElementById('leverage-amount').value = '';
     document.getElementById('position-size').value = '';
+    
+    // Clear stop orders inputs
+    document.getElementById('stop-loss-enabled').checked = false;
+    document.getElementById('take-profit-enabled').checked = false;
+    document.getElementById('stop-loss-price').value = '';
+    document.getElementById('take-profit-price').value = '';
+    document.getElementById('stop-loss-price').disabled = true;
+    document.getElementById('take-profit-price').disabled = true;
+    document.getElementById('stop-loss-percent').textContent = '--%';
+    document.getElementById('take-profit-percent').textContent = '+--%';
     
     // Reset fee info display
     const feeInfoElement = document.getElementById('leverage-fee-info');
@@ -3797,6 +4999,13 @@ async function closeLeveragePosition(positionId, percentage = 100) {
     if (percentage === 100) {
         // Close entire position
         leveragePositions.splice(positionIndex, 1);
+        
+        // Clear stop order lines from chart when position is fully closed
+        removeStopLossLineFromChart();
+        removeTakeProfitLineFromChart();
+        
+        // Reset stop order checkboxes and inputs
+        resetStopOrderSettings();
     } else {
         // Partially close position - reduce size, margin, and opening fee
         position.size *= (1 - closeRatio);
@@ -3864,6 +5073,11 @@ async function closeAllPositions() {
             console.error(`Error closing position ${position.id}:`, error);
         }
     }
+    
+    // Clear all stop order lines from chart when all positions are closed
+    removeStopLossLineFromChart();
+    removeTakeProfitLineFromChart();
+    resetStopOrderSettings();
     
     showToast(`Closed ${positionCount} position(s)`, 'success');
 }
@@ -4193,12 +5407,18 @@ function updateLeveragePositionsDisplay() {
                     </div>
                     <span class="margin-label">Margin</span>
                 </div>
-                <div class="position-close-dropdown">
-                    <button class="close-position-btn" data-position-id="${position.id}">Close</button>
-                    <div class="close-dropdown-menu" id="close-menu-${position.id}">
-                        <button class="close-option" data-position-id="${position.id}" data-percentage="25">25%</button>
-                        <button class="close-option" data-position-id="${position.id}" data-percentage="50">50%</button>
-                        <button class="close-option" data-position-id="${position.id}" data-percentage="100">100%</button>
+                <div class="position-actions">
+                    <button class="stop-orders-btn" data-position-id="${position.id}" title="Stop Orders">
+                        <i class="fas fa-shield-alt"></i>
+                        ${(position.stopLoss && position.stopLoss.enabled) || (position.takeProfit && position.takeProfit.enabled) ? '<span class="active-indicator"></span>' : ''}
+                    </button>
+                    <div class="position-close-dropdown">
+                        <button class="close-position-btn" data-position-id="${position.id}">Close</button>
+                        <div class="close-dropdown-menu" id="close-menu-${position.id}">
+                            <button class="close-option" data-position-id="${position.id}" data-percentage="25">25%</button>
+                            <button class="close-option" data-position-id="${position.id}" data-percentage="50">50%</button>
+                            <button class="close-option" data-position-id="${position.id}" data-percentage="100">100%</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -5253,8 +6473,8 @@ function updateMaSettingsFromList() {
 }
 
 function refreshActiveIndicators() {
-    // Get currently active indicators
-    const activeIndicators = [];
+    // Get currently active indicators and update global array
+    activeIndicators.length = 0; // Clear global array
     document.querySelectorAll('.indicator-btn.active').forEach(btn => {
         activeIndicators.push(btn.dataset.indicator);
     });
@@ -5354,17 +6574,17 @@ function addBollingerBands() {
     const bbData = calculateBollingerBands(candleData, indicatorSettings.bollinger.period, indicatorSettings.bollinger.std);
     
     indicators.bollinger.upper = chart.addLineSeries({
-        color: '#9C27B0',
+        color: '#2196F3',
         lineWidth: 1,
         title: `BB Upper(${indicatorSettings.bollinger.period},${indicatorSettings.bollinger.std})`
     });
     indicators.bollinger.middle = chart.addLineSeries({
-        color: '#9C27B0',
+        color: '#FF5252',
         lineWidth: 1,
         title: `BB Middle(${indicatorSettings.bollinger.period})`
     });
     indicators.bollinger.lower = chart.addLineSeries({
-        color: '#9C27B0',
+        color: '#2196F3',
         lineWidth: 1,
         title: `BB Lower(${indicatorSettings.bollinger.period},${indicatorSettings.bollinger.std})`
     });
@@ -5831,7 +7051,7 @@ function drawFibonacciRetracement(point1, point2, series) {
 }
 
 
-function drawHorizontalLine(price, series) {
+function drawHorizontalLine(price, series, isRestoring = false) {
     const targetSeries = series || candleSeries;
     if (!targetSeries) return;
     
@@ -5844,17 +7064,24 @@ function drawHorizontalLine(price, series) {
         title: `Drawing: ${price.toFixed(2)}`,
     });
     
-    drawings.push({
+    const newDrawing = {
         type: 'horizontal',
         line: line,
         price: price,
         series: targetSeries
-    });
+    };
     
-    // Auto-save chart settings after drawing
-    debouncedSaveChartSettings();
+    drawings.push(newDrawing);
     
-    showToast(`Horizontal line drawn at $${price.toFixed(2)}`, 'success');
+    // Only show logs and toast if not restoring from saved data
+    if (!isRestoring) {
+        console.log('🎨 Added drawing:', newDrawing);
+        console.log('🎨 Total drawings now:', drawings.length);
+        showToast(`Horizontal line drawn at $${price.toFixed(2)}`, 'success');
+        
+        // Auto-save chart settings after drawing
+        debouncedSaveChartSettings();
+    }
 }
 
 function drawVerticalLine(time) {
@@ -5862,6 +7089,7 @@ function drawVerticalLine(time) {
     // This would require custom implementation or using shapes
     showToast('Vertical lines not supported in current version', 'info');
 }
+
 
 function clearAllDrawings() {
     drawings.forEach(drawing => {
@@ -5903,7 +7131,7 @@ function switchChartType(type) {
     if (!chart || !candleData.length) return;
     
     // Remove all indicators first (they'll be re-added after new series creation)
-    const activeIndicators = [];
+    activeIndicators.length = 0; // Clear global array
     document.querySelectorAll('.indicator-btn.active').forEach(btn => {
         if (btn.dataset.indicator !== 'volume') {
             activeIndicators.push(btn.dataset.indicator);
@@ -6004,7 +7232,9 @@ function switchChartType(type) {
 }
 
 function redrawExistingDrawings() {
-    if (!drawings.length) return;
+    if (!drawings.length) {
+        return;
+    }
     
     const currentSeries = currentChartType === 'candlestick' ? candleSeries : lineSeries;
     if (!currentSeries) return;
@@ -6042,10 +7272,10 @@ function redrawExistingDrawings() {
     // Clear drawings array
     drawings = [];
     
-    // Recreate all drawings on the new series
+    // Recreate all drawings on the new series (with isRestoring = true)
     existingDrawings.forEach(drawing => {
         if (drawing.type === 'horizontal') {
-            drawHorizontalLine(drawing.price, currentSeries);
+            drawHorizontalLine(drawing.price, currentSeries, true);
         } else if (drawing.type === 'trend') {
             drawTrendLine(drawing.point1, drawing.point2, currentSeries);
         } else if (drawing.type === 'fibonacci') {
@@ -6061,29 +7291,65 @@ async function saveChartSettings() {
         console.log('No token found, skipping save');
         return;
     }
-    console.log('💾 Saving chart settings for', currentMarket);
 
     try {
-        // Get current indicator states (which ones are active)
-        const activeIndicators = {};
-        Object.keys(indicators).forEach(key => {
-            if (key === 'bollinger' && indicators[key]) {
-                // Bollinger bands - check if any of the lines exist
-                activeIndicators[key] = (indicators[key].upper !== null || 
-                                       indicators[key].middle !== null || 
-                                       indicators[key].lower !== null);
-            } else if (key === 'macd' && indicators[key]) {
-                // MACD - check if any of the lines exist
-                activeIndicators[key] = (indicators[key].macd !== null ||
-                                       indicators[key].signal !== null ||
-                                       indicators[key].histogram !== null);
-            } else {
-                // Simple indicators like MA, EMA, RSI
-                activeIndicators[key] = indicators[key] !== null && indicators[key] !== undefined;
-            }
+        // Get current indicator states from buttons
+        const activeIndicatorStates = {};
+        document.querySelectorAll('.indicator-btn').forEach(btn => {
+            const indicatorName = btn.dataset.indicator;
+            activeIndicatorStates[indicatorName] = btn.classList.contains('active');
         });
         
-        console.log('💾 Saving active indicators:', activeIndicators);
+
+        // Create a safe copy of settings for JSON serialization
+        let safeSettings;
+        try {
+            // Ensure activeIndicators is an array
+            const safeActiveIndicators = Array.isArray(activeIndicators) ? activeIndicators : [];
+            
+            safeSettings = {
+                market: currentMarket,
+                indicators: activeIndicatorStates, // Use button states instead of array
+                indicatorSettings: JSON.parse(JSON.stringify(indicatorSettings)), // Deep copy
+                drawings: drawings.filter(drawing => drawing && typeof drawing === 'object').map(drawing => {
+                    const safeDrawing = {
+                        type: drawing.type,
+                        settings: drawing.settings || {}
+                    };
+                    
+                    // Include appropriate data based on drawing type
+                    if (drawing.type === 'horizontal' && drawing.price !== undefined) {
+                        safeDrawing.price = drawing.price;
+                    } else if (['trend', 'fibonacci'].includes(drawing.type)) {
+                        safeDrawing.point1 = drawing.point1;
+                        safeDrawing.point2 = drawing.point2;
+                    } else if (Array.isArray(drawing.points)) {
+                        safeDrawing.points = drawing.points;
+                    }
+                    
+                    return safeDrawing;
+                }),
+                chartType: currentChartType
+            };
+            
+            // Test JSON serialization
+            JSON.stringify(safeSettings);
+        } catch (error) {
+            console.warn('Failed to create safe settings, using minimal settings:', error);
+            safeSettings = {
+                market: currentMarket,
+                indicators: activeIndicatorStates || {},
+                indicatorSettings: {
+                    ma: { period: 20 },
+                    ema: { period: 20 },
+                    bollinger: { period: 20, std: 2 },
+                    rsi: { period: 14 },
+                    macd: { fast: 12, slow: 26, signal: 9 }
+                },
+                drawings: [],
+                chartType: currentChartType
+            };
+        }
 
         const response = await fetch('/api/chart/settings', {
             method: 'POST',
@@ -6091,13 +7357,7 @@ async function saveChartSettings() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({
-                market: currentMarket,
-                indicators: activeIndicators,
-                indicatorSettings: indicatorSettings,
-                drawings: drawings,
-                chartType: currentChartType
-            })
+            body: JSON.stringify(safeSettings)
         });
 
         if (!response.ok) {
@@ -6114,7 +7374,6 @@ async function loadChartSettings() {
         console.log('No token found, skipping load');
         return;
     }
-    console.log('Loading chart settings for', currentMarket);
 
     try {
         const response = await fetch(`/api/chart/settings/${encodeURIComponent(currentMarket)}`, {
@@ -6123,14 +7382,12 @@ async function loadChartSettings() {
             }
         });
 
-        console.log('Response status:', response.status);
-        
         if (response.ok) {
             const data = await response.json();
-            console.log('Loaded data:', data);
-            if (data.settings) {
-                const settings = data.settings;
-                console.log('Settings found:', settings);
+            
+            // Check both data.data and data.settings for compatibility
+            const settings = data.data || data.settings;
+            if (settings) {
                 
                 // Restore indicator settings
                 if (settings.indicator_settings) {
@@ -6142,12 +7399,10 @@ async function loadChartSettings() {
                     drawings.length = 0; // Clear existing drawings
                     drawings.push(...settings.drawings);
                     
-                    // Redraw all drawings on chart
+                    // Redraw all drawings on chart after chart is fully initialized
                     setTimeout(() => {
-                        if (typeof redrawAllDrawings === 'function') {
-                            redrawAllDrawings();
-                        }
-                    }, 100);
+                        redrawExistingDrawings();
+                    }, 500); // Increased timeout to ensure chart is ready
                 }
                 
                 // Restore chart type
@@ -6157,21 +7412,20 @@ async function loadChartSettings() {
                 
                 // Restore active indicators
                 if (settings.indicators) {
-                    for (const [indicatorName, isActive] of Object.entries(settings.indicators)) {
-                        if (isActive) {
-                            // Reactivate the indicator
-                            setTimeout(() => {
+                    // Activate all indicators at once after a short delay for chart initialization
+                    setTimeout(() => {
+                        for (const [indicatorName, isActive] of Object.entries(settings.indicators)) {
+                            if (isActive) {
                                 toggleIndicator(indicatorName, true);
-                                // Update button states after indicator is applied
-                                setTimeout(() => {
-                                    updateIndicatorButtonStates();
-                                }, 100);
-                            }, 200);
+                            }
                         }
-                    }
+                        
+                        // Update all button states once after all indicators are applied
+                        setTimeout(() => {
+                            updateIndicatorButtonStates();
+                        }, 100);
+                    }, 200);
                 }
-                
-                console.log('Chart settings loaded successfully');
             } else {
                 console.log('No settings found in response');
             }

@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (response.status === 404) {
                 // User not found in rankings (demo account or no trades)
-                userRankingSection.style.display = 'none';
+                userRankingSection.classList.add('hidden');
             }
         } catch (error) {
             console.error('Error loading user ranking:', error);
@@ -235,7 +235,7 @@ document.addEventListener('DOMContentLoaded', function() {
         userWinRateSpan.textContent = `${(userRanking.win_rate || 0).toFixed(1)}%`;
         userTotalTradesSpan.textContent = userRanking.total_trades || 0;
         
-        userRankingSection.style.display = 'block';
+        userRankingSection.classList.remove('hidden');
     }
 
     /**
@@ -263,6 +263,32 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
+        // User dropdown functionality
+        const userDropdown = document.querySelector('.user-dropdown');
+        const userMenuTrigger = document.querySelector('.user-menu-trigger');
+        
+        if (userDropdown && userMenuTrigger) {
+            userMenuTrigger.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                userDropdown.classList.toggle('active');
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!userDropdown.contains(e.target)) {
+                    userDropdown.classList.remove('active');
+                }
+            });
+
+            // Close dropdown when pressing ESC
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    userDropdown.classList.remove('active');
+                }
+            });
+        }
+
         // Auto-refresh every 30 seconds
         setInterval(() => {
             loadRankings();
@@ -274,22 +300,22 @@ document.addEventListener('DOMContentLoaded', function() {
      * Show loading state
      */
     function showLoading() {
-        loadingState.style.display = 'flex';
-        emptyState.style.display = 'none';
+        loadingState.classList.remove('hidden');
+        emptyState.classList.add('hidden');
     }
 
     /**
      * Hide loading state
      */
     function hideLoading() {
-        loadingState.style.display = 'none';
+        loadingState.classList.add('hidden');
     }
 
     /**
      * Show empty state
      */
     function showEmptyState() {
-        emptyState.style.display = 'block';
+        emptyState.classList.remove('hidden');
         rankingsTableBody.innerHTML = '';
     }
 
@@ -297,7 +323,7 @@ document.addEventListener('DOMContentLoaded', function() {
      * Hide empty state
      */
     function hideEmptyState() {
-        emptyState.style.display = 'none';
+        emptyState.classList.add('hidden');
     }
 
     /**

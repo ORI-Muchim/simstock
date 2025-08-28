@@ -12,7 +12,16 @@ const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
 const { validationRules, sanitizers } = require('./middleware/validation');
-const { createUser, authenticateUser, getUserData, updateUserData, saveChartSettings, getChartSettings, deleteChartSettings, saveChatMessage, getChatHistory, getRankings, getUserRanking, updateAccountType } = require('./database');
+const { 
+    pool,
+    createUser, authenticateUser, getUserData, updateUserData, 
+    saveChartSettings, getChartSettings, deleteChartSettings, 
+    saveChatMessage, getChatHistory, 
+    getRankings, getUserRanking, updateAccountType,
+    getAlertSettings, updateAlertSettings,
+    createStopOrder, getActiveStopOrders, cancelStopOrder, executeStopOrder,
+    savePriceAlert, getUnacknowledgedAlerts, acknowledgeAlerts
+} = require('./database');
 const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
 const AlertManager = require('./monitoring/alert-manager');
@@ -71,7 +80,7 @@ const JWT_SECRET = (() => {
 // Rate limiting configuration
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // limit each IP to 1000 requests per windowMs
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
@@ -320,9 +329,195 @@ let priceHistory = [];
 let candleData = [];
 let orderbook = { bids: [], asks: [] };
 let marketPrices = {
-    'BTC-USDT': { price: 0, change: 0, high: 0, low: 0, volume: 0 },
-    'ETH-USDT': { price: 0, change: 0, high: 0, low: 0, volume: 0 }
+    'BTC-USDT': { price: 0, change: 0, high: 0, low: 0, volume: 0, lastPrice: 0 },
+    'ETH-USDT': { price: 0, change: 0, high: 0, low: 0, volume: 0, lastPrice: 0 }
 };
+
+// Price monitoring for alerts
+const priceCheckInterval = 5000; // Check every 5 seconds
+let priceMonitoringInterval = null;
+
+// Price monitoring and alert system
+async function checkPriceAlerts() {
+    try {
+        // Get all users with enabled alerts
+        const usersResult = await pool.query(`
+            SELECT u.id, u.username, als.*
+            FROM users u
+            JOIN alert_settings als ON u.id = als.user_id
+            WHERE als.price_alert_enabled = true
+        `);
+        
+        if (usersResult.rows.length === 0) return;
+        
+        // Check each market for price changes
+        for (const [market, currentData] of Object.entries(marketPrices)) {
+            if (currentData.price <= 0 || currentData.lastPrice <= 0) continue;
+            
+            const priceChange = Math.abs((currentData.price - currentData.lastPrice) / currentData.lastPrice) * 100;
+            
+            // Check each user's alert threshold
+            for (const user of usersResult.rows) {
+                if (priceChange >= user.price_alert_threshold) {
+                    const alertType = currentData.price > currentData.lastPrice ? 'price_spike' : 'price_drop';
+                    const changePercent = ((currentData.price - currentData.lastPrice) / currentData.lastPrice) * 100;
+                    
+                    // Create alert message
+                    const message = `${market.replace('-', '/')} ${alertType === 'price_spike' ? '📈' : '📉'} ${changePercent.toFixed(2)}% - $${currentData.price.toFixed(2)}`;
+                    
+                    // Save alert to database
+                    await savePriceAlert({
+                        user_id: user.id,
+                        market,
+                        alert_type: alertType,
+                        previous_price: currentData.lastPrice,
+                        current_price: currentData.price,
+                        change_percent: changePercent,
+                        message
+                    });
+                    
+                    // Send WebSocket alert to user if connected
+                    wss.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN && client.auth?.id === user.id) {
+                            client.send(JSON.stringify({
+                                type: 'price_alert',
+                                market,
+                                alertType,
+                                message,
+                                changePercent,
+                                currentPrice: currentData.price,
+                                previousPrice: currentData.lastPrice,
+                                timestamp: new Date().toISOString()
+                            }));
+                        }
+                    });
+                    
+                    logger.info('Price alert triggered', {
+                        userId: user.id,
+                        username: user.username,
+                        market,
+                        alertType,
+                        changePercent,
+                        currentPrice: currentData.price,
+                        previousPrice: currentData.lastPrice
+                    });
+                }
+            }
+            
+            // Update last price for next comparison
+            marketPrices[market].lastPrice = currentData.price;
+        }
+        
+        // Check and execute stop orders
+        await checkStopOrders();
+        
+    } catch (error) {
+        logger.error('Error checking price alerts:', { error: error.message, stack: error.stack });
+    }
+}
+
+// Check and execute stop orders
+async function checkStopOrders() {
+    try {
+        const stopOrdersResult = await pool.query(`
+            SELECT so.*, u.username
+            FROM stop_orders so
+            JOIN users u ON so.user_id = u.id
+            WHERE so.status = 'active'
+        `);
+        
+        for (const order of stopOrdersResult.rows) {
+            const marketKey = order.market.replace('/', '-');
+            const currentPrice = marketPrices[marketKey]?.price;
+            
+            if (!currentPrice || currentPrice <= 0) continue;
+            
+            let shouldExecute = false;
+            
+            // Check if stop order should be triggered
+            if (order.order_type === 'stop_loss') {
+                if (order.position_type === 'long' && currentPrice <= order.trigger_price) {
+                    shouldExecute = true;
+                } else if (order.position_type === 'short' && currentPrice >= order.trigger_price) {
+                    shouldExecute = true;
+                }
+            } else if (order.order_type === 'take_profit') {
+                if (order.position_type === 'long' && currentPrice >= order.trigger_price) {
+                    shouldExecute = true;
+                } else if (order.position_type === 'short' && currentPrice <= order.trigger_price) {
+                    shouldExecute = true;
+                }
+            }
+            
+            if (shouldExecute) {
+                // Execute stop order
+                const executedOrder = await executeStopOrder(order.id, currentPrice);
+                
+                if (executedOrder) {
+                    // Create alert for executed stop order
+                    const alertType = order.order_type === 'stop_loss' ? 'stop_loss' : 'take_profit';
+                    const message = `${order.order_type === 'stop_loss' ? '🛑 Stop Loss' : '🎯 Take Profit'} executed for ${order.market} at $${currentPrice.toFixed(2)}`;
+                    
+                    await savePriceAlert({
+                        user_id: order.user_id,
+                        market: order.market,
+                        alert_type: alertType,
+                        previous_price: order.trigger_price,
+                        current_price: currentPrice,
+                        change_percent: ((currentPrice - order.trigger_price) / order.trigger_price) * 100,
+                        message
+                    });
+                    
+                    // Send WebSocket notification
+                    wss.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN && client.auth?.id === order.user_id) {
+                            client.send(JSON.stringify({
+                                type: 'stop_order_executed',
+                                orderType: order.order_type,
+                                market: order.market,
+                                triggerPrice: order.trigger_price,
+                                executionPrice: currentPrice,
+                                message,
+                                timestamp: new Date().toISOString()
+                            }));
+                        }
+                    });
+                    
+                    logger.info('Stop order executed', {
+                        orderId: order.id,
+                        userId: order.user_id,
+                        username: order.username,
+                        orderType: order.order_type,
+                        market: order.market,
+                        triggerPrice: order.trigger_price,
+                        executionPrice: currentPrice
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        logger.error('Error checking stop orders:', { error: error.message });
+    }
+}
+
+// Start price monitoring
+function startPriceMonitoring() {
+    if (priceMonitoringInterval) {
+        clearInterval(priceMonitoringInterval);
+    }
+    
+    priceMonitoringInterval = setInterval(checkPriceAlerts, priceCheckInterval);
+    logger.info('Price monitoring started', { interval: priceCheckInterval });
+}
+
+// Stop price monitoring
+function stopPriceMonitoring() {
+    if (priceMonitoringInterval) {
+        clearInterval(priceMonitoringInterval);
+        priceMonitoringInterval = null;
+    }
+    logger.info('Price monitoring stopped');
+}
 
 function connectOKXWebSocket() {
     okxWs = new WebSocket('wss://ws.okx.com:8443/ws/v5/public');
@@ -361,6 +556,9 @@ function connectOKXWebSocket() {
         okxWs.send(JSON.stringify(orderbookSubscribe));
         
         logger.info('Subscribed to BTC/ETH ticker, orderbook channels');
+        
+        // Start price monitoring system for alerts and stop orders
+        startPriceMonitoring();
     });
     
     okxWs.on('message', (data) => {
@@ -1540,6 +1738,187 @@ app.post('/api/account/type', authenticateToken, async (req, res) => {
     }
 });
 
+// ==================== ALERT & STOP ORDER ENDPOINTS ====================
+
+/**
+ * @swagger
+ * /api/alerts/settings:
+ *   get:
+ *     tags:
+ *       - Alerts
+ *     summary: Get alert settings
+ *     description: Get user's alert notification settings
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Alert settings retrieved successfully
+ *       401:
+ *         description: Authentication required
+ */
+app.get('/api/alerts/settings', authenticateToken, async (req, res) => {
+    try {
+        const settings = await getAlertSettings(req.user.id);
+        res.json(createAPIResponse.success(settings, 'Alert settings retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching alert settings:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch alert settings', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/alerts/settings:
+ *   post:
+ *     tags:
+ *       - Alerts
+ *     summary: Update alert settings
+ *     description: Update user's alert notification settings
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               price_alert_enabled:
+ *                 type: boolean
+ *               price_alert_threshold:
+ *                 type: number
+ *                 minimum: 0.1
+ *                 maximum: 10
+ *               email_alerts:
+ *                 type: boolean
+ *               browser_alerts:
+ *                 type: boolean
+ *               sound_enabled:
+ *                 type: boolean
+ */
+app.post('/api/alerts/settings', authenticateToken, async (req, res) => {
+    try {
+        await updateAlertSettings(req.user.id, req.body);
+        res.json(createAPIResponse.success(null, 'Alert settings updated successfully'));
+    } catch (error) {
+        logger.error('Error updating alert settings:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to update alert settings', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/stop-orders:
+ *   post:
+ *     tags:
+ *       - Stop Orders
+ *     summary: Create stop loss or take profit order
+ *     security:
+ *       - bearerAuth: []
+ */
+app.post('/api/stop-orders', authenticateToken, async (req, res) => {
+    try {
+        const orderData = {
+            user_id: req.user.id,
+            ...req.body
+        };
+        
+        const orderId = await createStopOrder(orderData);
+        res.json(createAPIResponse.success({ orderId }, 'Stop order created successfully'));
+    } catch (error) {
+        logger.error('Error creating stop order:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to create stop order', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/stop-orders:
+ *   get:
+ *     tags:
+ *       - Stop Orders
+ *     summary: Get active stop orders
+ *     security:
+ *       - bearerAuth: []
+ */
+app.get('/api/stop-orders', authenticateToken, async (req, res) => {
+    try {
+        const { market } = req.query;
+        const orders = await getActiveStopOrders(req.user.id, market);
+        res.json(createAPIResponse.success(orders, 'Stop orders retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching stop orders:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch stop orders', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/stop-orders/{orderId}:
+ *   delete:
+ *     tags:
+ *       - Stop Orders
+ *     summary: Cancel stop order
+ *     security:
+ *       - bearerAuth: []
+ */
+app.delete('/api/stop-orders/:orderId', authenticateToken, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.orderId);
+        const success = await cancelStopOrder(orderId, req.user.id);
+        
+        if (success) {
+            res.json(createAPIResponse.success(null, 'Stop order cancelled successfully'));
+        } else {
+            res.status(404).json(createAPIResponse.error('Stop order not found', null, 404));
+        }
+    } catch (error) {
+        logger.error('Error cancelling stop order:', { orderId: req.params.orderId, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to cancel stop order', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/alerts/unacknowledged:
+ *   get:
+ *     tags:
+ *       - Alerts
+ *     summary: Get unacknowledged alerts
+ *     security:
+ *       - bearerAuth: []
+ */
+app.get('/api/alerts/unacknowledged', authenticateToken, async (req, res) => {
+    try {
+        const alerts = await getUnacknowledgedAlerts(req.user.id);
+        res.json(createAPIResponse.success(alerts, 'Alerts retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching alerts:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch alerts', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/alerts/acknowledge:
+ *   post:
+ *     tags:
+ *       - Alerts
+ *     summary: Acknowledge alerts
+ *     security:
+ *       - bearerAuth: []
+ */
+app.post('/api/alerts/acknowledge', authenticateToken, async (req, res) => {
+    try {
+        const { alertIds } = req.body;
+        await acknowledgeAlerts(req.user.id, alertIds);
+        res.json(createAPIResponse.success(null, 'Alerts acknowledged successfully'));
+    } catch (error) {
+        logger.error('Error acknowledging alerts:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to acknowledge alerts', null, 500));
+    }
+});
+
 /**
  * @swagger
  * /api/chart/settings:
@@ -1682,21 +2061,26 @@ function verifyWebSocketAuth(request) {
 // Handle WebSocket upgrade with authentication
 server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    logger.info('WebSocket upgrade request', { pathname, url: request.url });
     
     // Verify authentication for protected WebSocket endpoints
     if (pathname === '/chat') {
+        logger.info('Chat WebSocket upgrade attempt');
         const auth = verifyWebSocketAuth(request);
         if (!auth) {
+            logger.warn('Chat WebSocket authentication failed');
             socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
             socket.destroy();
             return;
         }
         
+        logger.info('Chat WebSocket authentication successful', { userId: auth.id, username: auth.username });
         chatWss.handleUpgrade(request, socket, head, (ws) => {
             ws.auth = auth; // Attach auth info to WebSocket
             chatWss.emit('connection', ws, request);
         });
     } else {
+        logger.debug('Market data WebSocket upgrade');
         // Market data WebSocket (public, but can add rate limiting)
         wss.handleUpgrade(request, socket, head, (ws) => {
             wss.emit('connection', ws, request);
@@ -1707,7 +2091,7 @@ server.on('upgrade', (request, socket, head) => {
 // Chat WebSocket connection handler
 chatWss.on('connection', (ws) => {
     // Authentication already verified in upgrade handler
-    const userId = ws.auth?.userId;
+    const userId = ws.auth?.id;
     const username = ws.auth?.username;
     const isAuthenticated = true;
     
@@ -1741,8 +2125,11 @@ chatWss.on('connection', (ws) => {
                         // Send online count
                         broadcastOnlineCount();
                         
-                        // Notify others that user joined
-                        broadcastSystemMessage(`${username} joined the chat`);
+                        // Only notify if this is actually a new connection (not a reconnection)
+                        const existingConnections = Array.from(chatClients.values()).filter(client => client.username === username);
+                        if (existingConnections.length <= 1) {
+                            broadcastSystemMessage(`${username} joined the chat`);
+                        }
                         
                     } catch (error) {
                         ws.send(JSON.stringify({
@@ -1841,6 +2228,7 @@ function broadcastSystemMessage(text) {
 
 function broadcastOnlineCount() {
     const count = chatClients.size;
+    logger.info('Broadcasting online count', { count, clientsSize: chatClients.size });
     const message = JSON.stringify({
         type: 'online_count',
         count: count
@@ -1972,6 +2360,9 @@ process.on('SIGINT', () => {
         clearInterval(okxWsPingInterval);
         okxWsPingInterval = null;
     }
+    
+    // Stop price monitoring
+    stopPriceMonitoring();
     
     dataScheduler.stop();
     performanceMonitor.stop();

@@ -371,19 +371,19 @@ function setupSettingsPage() {
 
     // Reset account data
     resetAccountBtn.addEventListener('click', () => {
-        resetModal.style.display = 'block';
+        resetModal.classList.remove('hidden');
         setTimeout(() => resetModal.classList.add('show'), 10);
     });
 
     // Close reset modal
     closeResetModal.addEventListener('click', () => {
         resetModal.classList.remove('show');
-        setTimeout(() => resetModal.style.display = 'none', 300);
+        setTimeout(() => resetModal.classList.add('hidden'), 300);
     });
 
     cancelResetBtn.addEventListener('click', () => {
         resetModal.classList.remove('show');
-        setTimeout(() => resetModal.style.display = 'none', 300);
+        setTimeout(() => resetModal.classList.add('hidden'), 300);
     });
 
     // Confirm reset
@@ -402,7 +402,7 @@ function setupSettingsPage() {
         
         // Close modal
         resetModal.classList.remove('show');
-        setTimeout(() => resetModal.style.display = 'none', 300);
+        setTimeout(() => resetModal.classList.add('hidden'), 300);
         
         showToast('Account data has been reset', 'success');
     });
@@ -411,7 +411,7 @@ function setupSettingsPage() {
     resetModal.addEventListener('click', (e) => {
         if (e.target === resetModal) {
             resetModal.classList.remove('show');
-            setTimeout(() => resetModal.style.display = 'none', 300);
+            setTimeout(() => resetModal.classList.add('hidden'), 300);
         }
     });
 
@@ -421,6 +421,9 @@ function setupSettingsPage() {
     
     // Setup Trading Sounds toggle
     setupTradingSoundsToggle();
+    
+    // Setup Alert Settings
+    setupAlertSettings();
 }
 
 // Setup custom dropdown functionality
@@ -440,9 +443,9 @@ function setupCustomDropdown() {
         } else {
             // Position the dropdown relative to the trigger
             const rect = trigger.getBoundingClientRect();
-            options.style.top = `${rect.bottom + window.scrollY}px`;
-            options.style.left = `${rect.left + window.scrollX}px`;
-            options.style.width = `${rect.width}px`;
+            options.style.setProperty('--dropdown-top', `${rect.bottom + window.scrollY}px`);
+            options.style.setProperty('--dropdown-left', `${rect.left + window.scrollX}px`);
+            options.style.setProperty('--dropdown-width', `${rect.width}px`);
             options.classList.add('show');
         }
     });
@@ -577,6 +580,169 @@ async function saveTimezoneChange(timezone) {
 }
 
 // Toast notification functions - matching script.js implementation
+// Setup alert settings functionality
+async function setupAlertSettings() {
+    const priceAlertsToggle = document.getElementById('price-alerts-toggle');
+    const alertThresholdSlider = document.getElementById('alert-threshold');
+    const thresholdValue = document.getElementById('threshold-value');
+    const browserNotificationsToggle = document.getElementById('browser-notifications-toggle');
+    const alertSoundToggle = document.getElementById('alert-sound-toggle');
+    const emailAlertsToggle = document.getElementById('email-alerts-toggle');
+    
+    // Load alert settings from server
+    await loadAlertSettings();
+    
+    // Update threshold display
+    if (alertThresholdSlider) {
+        alertThresholdSlider.addEventListener('input', (e) => {
+            thresholdValue.textContent = `${parseFloat(e.target.value).toFixed(1)}%`;
+        });
+        
+        alertThresholdSlider.addEventListener('change', async (e) => {
+            await saveAlertSettings();
+        });
+    }
+    
+    // Toggle event listeners
+    const toggles = [
+        { element: priceAlertsToggle, textId: 'price-alerts-text' },
+        { element: browserNotificationsToggle, textId: 'browser-notifications-text' },
+        { element: alertSoundToggle, textId: 'alert-sound-text' }
+    ];
+    
+    toggles.forEach(({ element, textId }) => {
+        if (element) {
+            element.addEventListener('change', async (e) => {
+                const text = document.getElementById(textId);
+                if (text) {
+                    text.textContent = e.target.checked ? 'Enabled' : 'Disabled';
+                }
+                
+                // Request browser notification permission if enabling
+                if (element === browserNotificationsToggle && e.target.checked) {
+                    if ('Notification' in window) {
+                        if (Notification.permission === 'default') {
+                            const permission = await Notification.requestPermission();
+                            if (permission !== 'granted') {
+                                e.target.checked = false;
+                                text.textContent = 'Disabled';
+                                showToast('Browser notifications permission denied', 'warning');
+                                return;
+                            } else {
+                                showToast('Browser notifications enabled!', 'success');
+                                // Show test notification
+                                setTimeout(() => {
+                                    new Notification('Notifications Enabled!', {
+                                        body: 'You will now receive price alerts and trade notifications.',
+                                        icon: '/favicon.ico'
+                                    });
+                                }, 1000);
+                            }
+                        } else if (Notification.permission === 'denied') {
+                            e.target.checked = false;
+                            text.textContent = 'Disabled';
+                            showToast('Browser notifications are blocked. Please enable them in your browser settings.', 'warning');
+                            return;
+                        } else {
+                            showToast('Browser notifications updated!', 'success');
+                        }
+                    } else {
+                        e.target.checked = false;
+                        text.textContent = 'Disabled';
+                        showToast('Your browser does not support notifications', 'error');
+                        return;
+                    }
+                }
+                
+                await saveAlertSettings();
+            });
+        }
+    });
+}
+
+// Load alert settings from server
+async function loadAlertSettings() {
+    const token = localStorage.getItem('token');
+    
+    try {
+        const response = await fetch('/api/alerts/settings', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            const settings = result.data;
+            
+            // Apply settings to UI
+            const priceAlertsToggle = document.getElementById('price-alerts-toggle');
+            const alertThresholdSlider = document.getElementById('alert-threshold');
+            const thresholdValue = document.getElementById('threshold-value');
+            const browserNotificationsToggle = document.getElementById('browser-notifications-toggle');
+            const alertSoundToggle = document.getElementById('alert-sound-toggle');
+            
+            if (priceAlertsToggle) {
+                priceAlertsToggle.checked = settings.price_alert_enabled;
+                document.getElementById('price-alerts-text').textContent = 
+                    settings.price_alert_enabled ? 'Enabled' : 'Disabled';
+            }
+            
+            if (alertThresholdSlider) {
+                alertThresholdSlider.value = settings.price_alert_threshold;
+                thresholdValue.textContent = `${parseFloat(settings.price_alert_threshold).toFixed(1)}%`;
+            }
+            
+            if (browserNotificationsToggle) {
+                browserNotificationsToggle.checked = settings.browser_alerts;
+                document.getElementById('browser-notifications-text').textContent = 
+                    settings.browser_alerts ? 'Enabled' : 'Disabled';
+            }
+            
+            if (alertSoundToggle) {
+                alertSoundToggle.checked = settings.sound_enabled;
+                document.getElementById('alert-sound-text').textContent = 
+                    settings.sound_enabled ? 'Enabled' : 'Disabled';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading alert settings:', error);
+    }
+}
+
+// Save alert settings to server
+async function saveAlertSettings() {
+    const token = localStorage.getItem('token');
+    
+    const settings = {
+        price_alert_enabled: document.getElementById('price-alerts-toggle')?.checked || false,
+        price_alert_threshold: parseFloat(document.getElementById('alert-threshold')?.value || 1),
+        email_alerts: document.getElementById('email-alerts-toggle')?.checked || false,
+        browser_alerts: document.getElementById('browser-notifications-toggle')?.checked || true,
+        sound_enabled: document.getElementById('alert-sound-toggle')?.checked || true
+    };
+    
+    try {
+        const response = await fetch('/api/alerts/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(settings)
+        });
+        
+        if (response.ok) {
+            showToast('Alert settings saved', 'success', 2000);
+        } else {
+            showToast('Failed to save alert settings', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving alert settings:', error);
+        showToast('Failed to save alert settings', 'error');
+    }
+}
+
 function showToast(message, type = 'info', duration = 5000) {
     const toastContainer = document.getElementById('toast-container') || createToastContainer();
     

@@ -2523,12 +2523,16 @@ span[data-percentage] {
     font-size: 2rem;
     margin-bottom: 30px;
     font-weight: 600;
+    text-align: center;
 }
 
 .markets-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 25px;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 30px;
+    justify-content: center;
+    max-width: 900px;
+    margin: 0 auto;
 }
 
 .market-card {
@@ -2734,8 +2738,36 @@ span[data-percentage] {
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     }
     
+    .markets-container {
+        padding: 15px 20px;
+    }
+    
+    .markets-title {
+        font-size: 1.8rem;
+    }
+    
+    .markets-subtitle {
+        font-size: 0.9rem;
+        margin-bottom: 30px;
+    }
+    
     .markets-grid {
         grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .market-card {
+        max-width: none;
+        padding: 20px;
+    }
+    
+    .market-stats-grid {
+        gap: 12px;
+        padding: 12px;
+    }
+    
+    .market-stat .stat-label {
+        font-size: 0.78rem;
     }
     
     .market-dropdown {
@@ -3878,6 +3910,9 @@ span[data-percentage] {
 
 .custom-select-options {
     position: fixed;
+    top: var(--dropdown-top, 0);
+    left: var(--dropdown-left, 0);
+    width: var(--dropdown-width, 280px);
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -4521,12 +4556,16 @@ select option:focus {
 
 /* Loading State */
 .loading-state {
-    display: flex;
+    display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 60px 20px;
     color: var(--text-secondary);
+}
+
+.loading-state:not(.hidden) {
+    display: flex;
 }
 
 .loading-spinner {
@@ -4656,4 +4695,817 @@ select option:focus {
         font-size: 10px;
         padding: 2px 6px;
     }
+}
+
+/* ==================== STOP ORDERS UI STYLES ==================== */
+
+.stop-orders-section {
+    margin-top: 20px;
+    padding: 15px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.stop-orders-title {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stop-orders-title i {
+    color: var(--accent-yellow);
+}
+
+.stop-order-row {
+    display: flex;
+    gap: 15px;
+}
+
+.stop-order-input {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stop-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+}
+
+
+.stop-order-input .input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.stop-order-input input[type="number"] {
+    flex: 1;
+    padding: 8px 50px 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.stop-order-input input[type="number"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.stop-order-input input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.stop-order-input .input-suffix {
+    position: absolute;
+    right: 12px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.stop-percent-display {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-red);
+    text-align: center;
+    padding: 4px 8px;
+    background: rgba(255, 90, 95, 0.1);
+    border-radius: 4px;
+}
+
+.stop-percent-display.profit {
+    color: var(--accent-green);
+    background: rgba(0, 214, 143, 0.1);
+}
+
+/* Active Stop Orders Display */
+.active-stop-orders {
+    margin-top: 15px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.active-stop-orders-title {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+
+.stop-order-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.stop-order-item:last-child {
+    margin-bottom: 0;
+}
+
+.stop-order-info {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.stop-order-type {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.stop-order-type.stop-loss {
+    background: rgba(255, 90, 95, 0.1);
+    color: var(--accent-red);
+}
+
+.stop-order-type.take-profit {
+    background: rgba(0, 214, 143, 0.1);
+    color: var(--accent-green);
+}
+
+.stop-order-price {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.stop-order-cancel {
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--accent-red);
+    color: var(--accent-red);
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.stop-order-cancel:hover {
+    background: var(--accent-red);
+    color: white;
+}
+
+/* Price alert animation */
+.price-alert {
+    animation: priceAlertPulse 3s ease-in-out;
+    background: rgba(255, 193, 7, 0.2) !important;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+@keyframes priceAlertPulse {
+    0% { 
+        background: rgba(255, 193, 7, 0.4);
+        transform: scale(1);
+    }
+    50% { 
+        background: rgba(255, 193, 7, 0.6);
+        transform: scale(1.05);
+    }
+    100% { 
+        background: rgba(255, 193, 7, 0.2);
+        transform: scale(1);
+    }
+}
+
+/* Enhanced Stop Orders UI */
+.stop-order-help {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: rgba(59, 130, 246, 0.9);
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.stop-order-card {
+    background: var(--card-bg, #1f2937);
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: all 0.3s ease;
+}
+
+.stop-order-card:hover {
+    border-color: var(--primary-blue, #3b82f6);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+}
+
+.stop-loss-card {
+    border-left: 3px solid var(--accent-red, #ef4444);
+}
+
+.take-profit-card {
+    border-left: 3px solid var(--accent-green, #10b981);
+}
+
+.stop-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.stop-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-primary, #f3f4f6);
+}
+
+.stop-icon {
+    font-size: 16px;
+}
+
+.current-price-ref {
+    font-size: 12px;
+    color: var(--text-secondary, #9ca3af);
+    background: var(--bg-tertiary, #111827);
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.stop-input-methods {
+    margin-top: 12px;
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.input-method-tabs {
+    display: flex;
+    background: var(--bg-tertiary, #111827);
+    border-radius: 8px;
+    padding: 4px;
+    margin-bottom: 16px;
+}
+
+.method-tab {
+    flex: 1;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-secondary, #9ca3af);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.method-tab.active {
+    background: var(--primary-blue, #3b82f6);
+    color: white;
+}
+
+.method-tab:hover:not(.active) {
+    background: var(--border-color, #374151);
+    color: var(--text-primary, #f3f4f6);
+}
+
+.method-content {
+    display: none;
+}
+
+.method-content.active {
+    display: block;
+}
+
+.method-content label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary, #9ca3af);
+    margin-bottom: 8px;
+}
+
+.range-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.range-input-wrapper input[type="range"] {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-tertiary, #111827);
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.range-input-wrapper input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--primary-blue, #3b82f6);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.range-input-wrapper input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: var(--primary-blue, #3b82f6);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.range-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, #f3f4f6);
+    min-width: 50px;
+    text-align: center;
+    background: var(--bg-tertiary, #111827);
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.calculated-price,
+.calculated-percent {
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 12px;
+    background: var(--bg-tertiary, #111827);
+    border-radius: 8px;
+    border-left: 3px solid var(--accent-red, #ef4444);
+}
+
+.calculated-price.profit,
+.calculated-percent.profit {
+    border-left-color: var(--accent-green, #10b981);
+    color: var(--accent-green, #10b981);
+}
+
+.calculated-price:not(.profit),
+.calculated-percent:not(.profit) {
+    color: var(--accent-red, #ef4444);
+}
+
+
+/* Position-specific stop orders UI */
+.position-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.stop-orders-btn {
+    width: 32px;
+    height: 32px;
+    background: var(--bg-tertiary, #111827);
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 6px;
+    color: var(--text-secondary, #9ca3af);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.stop-orders-btn:hover {
+    background: var(--border-color, #374151);
+    color: var(--text-primary, #f3f4f6);
+}
+
+.stop-orders-btn .active-indicator {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 8px;
+    height: 8px;
+    background: var(--accent-green, #10b981);
+    border-radius: 50%;
+    border: 2px solid var(--card-bg, #1f2937);
+}
+
+.stop-orders-btn i {
+    font-size: 12px;
+}
+
+/* Position stop orders modal */
+.position-stop-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.position-stop-modal.active {
+    display: flex;
+}
+
+.position-stop-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    max-width: 480px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+
+.position-stop-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+.position-stop-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.modal-close-btn {
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.position-info-summary {
+    background: var(--bg-primary);
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.position-info-summary .position-type {
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.position-info-summary .long {
+    color: var(--accent-green, #10b981);
+}
+
+.position-info-summary .short {
+    color: var(--accent-red, #ef4444);
+}
+
+/* Modal stop orders section */
+.position-stop-modal .stop-orders-section {
+    padding: 16px 20px 20px;
+}
+
+/* Stop order cards */
+.stop-order-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.stop-card-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-primary);
+}
+
+.stop-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    user-select: none;
+}
+
+/* Custom checkbox styling */
+.stop-checkbox {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-primary);
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+    margin: 0;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.stop-checkbox:hover {
+    border-color: var(--accent-green);
+}
+
+.stop-checkbox:checked {
+    background: var(--accent-green);
+    border-color: var(--accent-green);
+}
+
+.stop-checkbox:checked::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1;
+}
+
+/* Stop Loss specific styling */
+.stop-loss-card .stop-checkbox:hover {
+    border-color: var(--accent-red);
+}
+
+.stop-loss-card .stop-checkbox:checked {
+    background: var(--accent-red);
+    border-color: var(--accent-red);
+}
+
+.stop-icon {
+    font-size: 16px;
+}
+
+.current-price-ref {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-weight: normal;
+}
+
+/* Stop input methods */
+.stop-input-methods {
+    padding: 16px;
+}
+
+.input-method-tabs {
+    display: flex;
+    margin-bottom: 16px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    padding: 2px;
+}
+
+.method-tab {
+    flex: 1;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.method-tab.active,
+.method-tab:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.method-content {
+    display: none;
+}
+
+.method-content.active {
+    display: block;
+}
+
+.method-content label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* Range input styling */
+.range-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.range-input-wrapper input[type="range"] {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-primary);
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.range-input-wrapper input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent-green);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.range-value {
+    min-width: 50px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.stop-loss-card .range-value {
+    color: var(--accent-red);
+}
+
+.take-profit-card .range-value {
+    color: var(--accent-green);
+}
+
+/* Price input styling */
+.input-wrapper {
+    position: relative;
+    margin-bottom: 8px;
+}
+
+.input-wrapper input {
+    width: 100%;
+    padding: 8px 40px 8px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.input-wrapper input:focus {
+    outline: none;
+    border-color: var(--accent-green);
+}
+
+.input-suffix {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
+/* Calculated values */
+.calculated-price,
+.calculated-percent {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    margin-top: 6px;
+    display: inline-block;
+    min-width: 120px;
+    text-align: center;
+    font-weight: 500;
+}
+
+.calculated-price.profit,
+.calculated-percent.profit {
+    color: var(--accent-green);
+    background: rgba(0, 214, 143, 0.1);
+    border-color: rgba(0, 214, 143, 0.3);
+}
+
+/* Stop Loss specific calculated values */
+.stop-loss-card .calculated-price:not(.profit),
+.stop-loss-card .calculated-percent:not(.profit) {
+    color: var(--accent-red);
+    background: rgba(255, 90, 95, 0.1);
+    border-color: rgba(255, 90, 95, 0.3);
+}
+
+/* Helper classes to replace inline styles */
+.hidden {
+    display: none !important;
+}
+
+.fee-info {
+    color: #9ca3af;
+    margin-top: 4px;
+    display: block;
+}
+
+/* Modal action buttons container */
+.modal-action-buttons {
+    margin-top: 24px;
+    display: flex;
+    gap: 12px;
+}
+
+.modal-action-buttons .modal-btn {
+    flex: 1;
+}
+
+/* Modal action buttons */
+.position-stop-modal .btn {
+    padding: 10px 20px;
+    font-size: 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.position-stop-modal .btn-primary {
+    background: var(--accent-green);
+    border-color: var(--accent-green);
+    color: white;
+}
+
+.position-stop-modal .btn-primary:hover {
+    background: #00b377;
+    border-color: #00b377;
+}
+
+.position-stop-modal .btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.position-stop-modal .btn-secondary:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
 }
