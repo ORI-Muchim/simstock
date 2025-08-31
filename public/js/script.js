@@ -217,13 +217,13 @@ document.addEventListener('DOMContentLoaded', () => {
     setupTimezoneListener();
     
     // Initialize chat if logged in
-    console.warn('🟡 CHAT DEBUG: Attempting to initialize chat...');
-    if (typeof window.initializeChatAfterLogin === 'function') {
-        console.warn('🟡 CHAT DEBUG: initializeChatAfterLogin function found, calling...');
-        window.initializeChatAfterLogin();
-    } else {
-        console.warn('🔴 CHAT DEBUG: initializeChatAfterLogin function not found');
-    }
+    // console.warn('🟡 CHAT DEBUG: Attempting to initialize chat...');
+    // if (typeof window.initializeChatAfterLogin === 'function') {
+    //     console.warn('🟡 CHAT DEBUG: initializeChatAfterLogin function found, calling...');
+    //     window.initializeChatAfterLogin();
+    // } else {
+    //     console.warn('🔴 CHAT DEBUG: initializeChatAfterLogin function not found');
+    // }
     
     // Request notification permission for alerts
     requestNotificationPermission();
