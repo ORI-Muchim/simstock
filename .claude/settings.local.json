@@ -50,7 +50,13 @@
       "Bash(cmd:*)",
       "Bash(create_db.bat)",
       "Bash(del create_db.bat)",
-      "Bash(start http://localhost:3000/?page=markets)"
+      "Bash(start http://localhost:3000/?page=markets)",
+      "Bash(pkill:*)",
+      "Bash(\"C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe\" -U postgres -h localhost -d cryptosim -c \"\nCREATE TABLE IF NOT EXISTS follows (\n    id SERIAL PRIMARY KEY,\n    follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    UNIQUE(follower_id, followed_id),\n    CHECK (follower_id != followed_id)\n);\nCREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id);\nCREATE INDEX IF NOT EXISTS idx_follows_followed_id ON follows(followed_id);\n\")",
+      "Bash(\"C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe\" -U postgres -h localhost -d cryptosim -c \"\nCREATE TABLE IF NOT EXISTS follows (\n    id SERIAL PRIMARY KEY,\n    follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    UNIQUE(follower_id, followed_id),\n    CHECK (follower_id != followed_id)\n);\n\")",
+      "Bash(DB_PASSWORD=REDACTED_PASSWORD npm start)",
+      "Bash(DB_PASSWORD=REDACTED_PASSWORD node create_social_tables.js)",
+      "Bash(open http://localhost:3000/social)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

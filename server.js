@@ -20,7 +20,10 @@ const {
     getRankings, getUserRanking, updateAccountType,
     getAlertSettings, updateAlertSettings,
     createStopOrder, getActiveStopOrders, cancelStopOrder, executeStopOrder,
-    savePriceAlert, getUnacknowledgedAlerts, acknowledgeAlerts
+    savePriceAlert, getUnacknowledgedAlerts, acknowledgeAlerts,
+    // Social functions
+    followUser, unfollowUser, isFollowing, getFollowing, getFollowers, 
+    getFollowStats, getFollowedUserTransactions
 } = require('./database');
 const MarketDataScheduler = require('./scheduler');
 const PerformanceMonitor = require('./monitoring/performance-monitor');
@@ -282,8 +285,8 @@ app.get('/monitoring', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'monitoring.html'));
 });
 
-app.get('/rankings', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'rankings.html'));
+app.get('/social', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'social.html'));
 });
 
 // Legacy routes for backwards compatibility
@@ -304,7 +307,15 @@ app.get('/monitoring.html', (req, res) => {
 });
 
 app.get('/rankings.html', (req, res) => {
-    res.redirect('/rankings');
+    res.redirect('/social');
+});
+
+app.get('/rankings', (req, res) => {
+    res.redirect('/social');
+});
+
+app.get('/social.html', (req, res) => {
+    res.redirect('/social');
 });
 
 // HTTP Server
@@ -2321,6 +2332,328 @@ app.use((err, req, res, next) => {
         error: message,
         ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
     });
+});
+
+// ==================== SOCIAL ENDPOINTS ====================
+
+/**
+ * @swagger
+ * /api/social/follow:
+ *   post:
+ *     tags:
+ *       - Social
+ *     summary: Follow a user
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: integer
+ *                 description: ID of user to follow
+ *             required:
+ *               - userId
+ *     responses:
+ *       200:
+ *         description: User followed successfully
+ *       400:
+ *         description: Invalid user ID or cannot follow yourself
+ *       401:
+ *         description: Authentication required
+ */
+app.post('/api/social/follow', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.body;
+        
+        if (!userId || userId <= 0) {
+            return res.status(400).json(createAPIResponse.error('Invalid user ID', null, 400));
+        }
+        
+        if (userId === req.user.id) {
+            return res.status(400).json(createAPIResponse.error('Cannot follow yourself', null, 400));
+        }
+        
+        await followUser(req.user.id, userId);
+        res.json(createAPIResponse.success(null, 'User followed successfully'));
+    } catch (error) {
+        if (error.message === 'Already following this user') {
+            return res.status(400).json(createAPIResponse.error(error.message, null, 400));
+        }
+        if (error.message === 'Cannot follow yourself') {
+            return res.status(400).json(createAPIResponse.error(error.message, null, 400));
+        }
+        logger.error('Error following user:', { userId: req.user.id, followUserId: req.body.userId, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to follow user', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/social/unfollow:
+ *   post:
+ *     tags:
+ *       - Social
+ *     summary: Unfollow a user
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: integer
+ *                 description: ID of user to unfollow
+ *             required:
+ *               - userId
+ *     responses:
+ *       200:
+ *         description: User unfollowed successfully
+ *       400:
+ *         description: Invalid user ID
+ *       401:
+ *         description: Authentication required
+ */
+app.post('/api/social/unfollow', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.body;
+        
+        if (!userId || userId <= 0) {
+            return res.status(400).json(createAPIResponse.error('Invalid user ID', null, 400));
+        }
+        
+        const success = await unfollowUser(req.user.id, userId);
+        
+        if (!success) {
+            return res.status(404).json(createAPIResponse.error('User not found in following list', null, 404));
+        }
+        
+        res.json(createAPIResponse.success(null, 'User unfollowed successfully'));
+    } catch (error) {
+        logger.error('Error unfollowing user:', { userId: req.user.id, unfollowUserId: req.body.userId, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to unfollow user', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/social/following:
+ *   get:
+ *     tags:
+ *       - Social
+ *     summary: Get users you are following
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Maximum number of users to return
+ *     responses:
+ *       200:
+ *         description: Following list retrieved successfully
+ *       401:
+ *         description: Authentication required
+ */
+app.get('/api/social/following', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const following = await getFollowing(req.user.id, limit);
+        
+        res.json(createAPIResponse.success(following, 'Following list retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching following list:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch following list', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/social/followers:
+ *   get:
+ *     tags:
+ *       - Social
+ *     summary: Get your followers
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Maximum number of users to return
+ *     responses:
+ *       200:
+ *         description: Followers list retrieved successfully
+ *       401:
+ *         description: Authentication required
+ */
+app.get('/api/social/followers', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const followers = await getFollowers(req.user.id, limit);
+        
+        res.json(createAPIResponse.success(followers, 'Followers list retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching followers list:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch followers list', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/social/stats:
+ *   get:
+ *     tags:
+ *       - Social
+ *     summary: Get follow statistics
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Follow statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     following:
+ *                       type: integer
+ *                     followers:
+ *                       type: integer
+ *       401:
+ *         description: Authentication required
+ */
+app.get('/api/social/stats', authenticateToken, async (req, res) => {
+    try {
+        const stats = await getFollowStats(req.user.id);
+        res.json(createAPIResponse.success(stats, 'Follow statistics retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching follow stats:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch follow statistics', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/social/is-following/{userId}:
+ *   get:
+ *     tags:
+ *       - Social
+ *     summary: Check if you are following a user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of user to check
+ *     responses:
+ *       200:
+ *         description: Follow status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     isFollowing:
+ *                       type: boolean
+ *       400:
+ *         description: Invalid user ID
+ *       401:
+ *         description: Authentication required
+ */
+app.get('/api/social/is-following/:userId', authenticateToken, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        
+        if (!userId || userId <= 0) {
+            return res.status(400).json(createAPIResponse.error('Invalid user ID', null, 400));
+        }
+        
+        const isFollowingUser = await isFollowing(req.user.id, userId);
+        res.json(createAPIResponse.success({ isFollowing: isFollowingUser }, 'Follow status retrieved successfully'));
+    } catch (error) {
+        logger.error('Error checking follow status:', { userId: req.user.id, checkUserId: req.params.userId, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to check follow status', null, 500));
+    }
+});
+
+/**
+ * @swagger
+ * /api/social/activities:
+ *   get:
+ *     tags:
+ *       - Social
+ *     summary: Get trading activities from followed users
+ *     description: Get recent trading activities from users you follow (10-minute delay for privacy)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Maximum number of activities to return
+ *     responses:
+ *       200:
+ *         description: Trading activities retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       username:
+ *                         type: string
+ *                       user_id:
+ *                         type: integer
+ *                       transaction:
+ *                         type: object
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *       401:
+ *         description: Authentication required
+ */
+app.get('/api/social/activities', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+        const activities = await getFollowedUserTransactions(req.user.id, limit);
+        
+        res.json(createAPIResponse.success(activities, 'Trading activities retrieved successfully'));
+    } catch (error) {
+        logger.error('Error fetching trading activities:', { userId: req.user.id, error: error.message });
+        res.status(500).json(createAPIResponse.error('Failed to fetch trading activities', null, 500));
+    }
 });
 
 // Handle 404 - Serve HTML for browser requests, JSON for API requests

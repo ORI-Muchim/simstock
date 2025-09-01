@@ -101,8 +101,38 @@ const initializeAlertTables = async () => {
     }
 };
 
+// Initialize social tables for follow/following functionality
+const initializeSocialTables = async () => {
+    try {
+        // Create follows table for follow/following relationships
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS follows (
+                id SERIAL PRIMARY KEY,
+                follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(follower_id, followed_id),
+                CHECK (follower_id != followed_id)
+            )
+        `);
+
+        // Create index for faster queries
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id)
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_follows_followed_id ON follows(followed_id)
+        `);
+
+        logger.info('Social tables (follows) initialized successfully');
+    } catch (error) {
+        logger.error('Error initializing social tables', { error: error.message });
+    }
+};
+
 // Initialize tables on startup
 initializeAlertTables();
+initializeSocialTables();
 
 const createUser = async (username, password) => {
     const client = await pool.connect();
@@ -902,6 +932,207 @@ const acknowledgeAlerts = async (userId, alertIds) => {
     }
 };
 
+// Social functions for follow/following functionality
+/**
+ * Follow a user
+ * @param {number} followerId - ID of the user who wants to follow
+ * @param {number} followedId - ID of the user to be followed
+ * @returns {Promise<boolean>} Success status
+ */
+const followUser = async (followerId, followedId) => {
+    try {
+        if (followerId === followedId) {
+            throw new Error('Cannot follow yourself');
+        }
+
+        await pool.query(
+            'INSERT INTO follows (follower_id, followed_id) VALUES ($1, $2)',
+            [followerId, followedId]
+        );
+        
+        return true;
+    } catch (error) {
+        if (error.code === '23505') { // unique constraint violation
+            throw new Error('Already following this user');
+        }
+        logger.error('Error following user', { followerId, followedId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Unfollow a user
+ * @param {number} followerId - ID of the user who wants to unfollow
+ * @param {number} followedId - ID of the user to be unfollowed
+ * @returns {Promise<boolean>} Success status
+ */
+const unfollowUser = async (followerId, followedId) => {
+    try {
+        const result = await pool.query(
+            'DELETE FROM follows WHERE follower_id = $1 AND followed_id = $2',
+            [followerId, followedId]
+        );
+        
+        return result.rowCount > 0;
+    } catch (error) {
+        logger.error('Error unfollowing user', { followerId, followedId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Check if user is following another user
+ * @param {number} followerId - ID of the potential follower
+ * @param {number} followedId - ID of the potentially followed user
+ * @returns {Promise<boolean>} Whether the user is following
+ */
+const isFollowing = async (followerId, followedId) => {
+    try {
+        const result = await pool.query(
+            'SELECT 1 FROM follows WHERE follower_id = $1 AND followed_id = $2',
+            [followerId, followedId]
+        );
+        
+        return result.rowCount > 0;
+    } catch (error) {
+        logger.error('Error checking follow status', { followerId, followedId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Get users that a user is following
+ * @param {number} userId - User ID
+ * @param {number} [limit=50] - Maximum number of results
+ * @returns {Promise<Array>} Array of followed user data
+ */
+const getFollowing = async (userId, limit = 50) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                u.id, u.username, u.created_at,
+                ud.usd_balance, ud.btc_balance,
+                f.created_at as followed_at
+            FROM follows f
+            JOIN users u ON f.followed_id = u.id
+            LEFT JOIN user_data ud ON u.id = ud.user_id
+            WHERE f.follower_id = $1
+            ORDER BY f.created_at DESC
+            LIMIT $2
+        `, [userId, limit]);
+        
+        return result.rows.map(row => ({
+            ...row,
+            usd_balance: parseFloat(row.usd_balance || 10000),
+            btc_balance: parseFloat(row.btc_balance || 0)
+        }));
+    } catch (error) {
+        logger.error('Error getting following list', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Get users that follow a user (followers)
+ * @param {number} userId - User ID
+ * @param {number} [limit=50] - Maximum number of results
+ * @returns {Promise<Array>} Array of follower user data
+ */
+const getFollowers = async (userId, limit = 50) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                u.id, u.username, u.created_at,
+                ud.usd_balance, ud.btc_balance,
+                f.created_at as followed_at
+            FROM follows f
+            JOIN users u ON f.follower_id = u.id
+            LEFT JOIN user_data ud ON u.id = ud.user_id
+            WHERE f.followed_id = $1
+            ORDER BY f.created_at DESC
+            LIMIT $2
+        `, [userId, limit]);
+        
+        return result.rows.map(row => ({
+            ...row,
+            usd_balance: parseFloat(row.usd_balance || 10000),
+            btc_balance: parseFloat(row.btc_balance || 0)
+        }));
+    } catch (error) {
+        logger.error('Error getting followers list', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Get follow statistics for a user
+ * @param {number} userId - User ID
+ * @returns {Promise<Object>} Follow statistics
+ */
+const getFollowStats = async (userId) => {
+    try {
+        const followingResult = await pool.query(
+            'SELECT COUNT(*) as count FROM follows WHERE follower_id = $1',
+            [userId]
+        );
+        
+        const followersResult = await pool.query(
+            'SELECT COUNT(*) as count FROM follows WHERE followed_id = $1',
+            [userId]
+        );
+        
+        return {
+            following: parseInt(followingResult.rows[0].count),
+            followers: parseInt(followersResult.rows[0].count)
+        };
+    } catch (error) {
+        logger.error('Error getting follow stats', { userId, error: error.message });
+        throw error;
+    }
+};
+
+/**
+ * Get recent transactions from followed users (with 10-minute delay)
+ * @param {number} userId - User ID requesting the data
+ * @param {number} [limit=20] - Maximum number of transactions
+ * @returns {Promise<Array>} Array of transaction data from followed users
+ */
+const getFollowedUserTransactions = async (userId, limit = 20) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                u.username,
+                txn.transaction_data,
+                u.id as user_id,
+                txn.tx_timestamp
+            FROM follows f
+            JOIN users u ON f.followed_id = u.id
+            JOIN user_data ud ON u.id = ud.user_id
+            JOIN LATERAL (
+                SELECT 
+                    jsonb_array_elements(ud.transactions) as transaction_data,
+                    (jsonb_array_elements(ud.transactions)->>'timestamp')::bigint as tx_timestamp
+                FROM user_data
+                WHERE user_id = u.id AND transactions != '[]'::jsonb
+            ) txn(transaction_data, tx_timestamp) ON true
+            WHERE f.follower_id = $1
+            AND txn.tx_timestamp <= EXTRACT(EPOCH FROM (NOW() - INTERVAL '10 minutes')) * 1000
+            ORDER BY txn.tx_timestamp DESC
+            LIMIT $2
+        `, [userId, limit]);
+        
+        return result.rows.map(row => ({
+            username: row.username,
+            user_id: row.user_id,
+            transaction: row.transaction_data,
+            timestamp: row.tx_timestamp
+        }));
+    } catch (error) {
+        logger.error('Error getting followed user transactions', { userId, error: error.message });
+        throw error;
+    }
+};
+
 process.on('SIGINT', closePool);
 process.on('SIGTERM', closePool);
 
@@ -938,5 +1169,13 @@ module.exports = {
     savePriceAlert,
     getUnacknowledgedAlerts,
     acknowledgeAlerts,
+    // Social functions
+    followUser,
+    unfollowUser,
+    isFollowing,
+    getFollowing,
+    getFollowers,
+    getFollowStats,
+    getFollowedUserTransactions,
     closePool
 };

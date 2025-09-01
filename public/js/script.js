@@ -269,9 +269,9 @@ function switchPage(page) {
     } else if (page === 'history') {
         // Redirect to history page
         window.location.href = '/history';
-    } else if (page === 'rankings') {
-        // Redirect to rankings page
-        window.location.href = '/rankings';
+    } else if (page === 'social') {
+        // Redirect to social page
+        window.location.href = '/social';
     } else {
         tradePage.classList.remove('hidden');
         marketsPage.classList.add('hidden');
@@ -5327,7 +5327,7 @@ function updateLeveragePositionsDisplay() {
     const container = document.getElementById('active-positions');
     
     if (leveragePositions.length === 0) {
-        container.innerHTML = '<p class="empty-message-inline">No positions</p>';
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-chart-bar"></i><p>No active positions</p></div>';
         return;
     }
     
