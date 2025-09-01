@@ -6,7 +6,9 @@ let transactions = [];
 let leveragePositions = [];
 let usdBalance = 10000;
 let btcBalance = 0;
+let ethBalance = 0;
 let userTimezone = 'UTC';
+
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', async () => {
@@ -126,12 +128,13 @@ async function loadUserData() {
             
             usdBalance = Number.isFinite(userData.usdBalance) ? userData.usdBalance : 10000;
             btcBalance = Number.isFinite(userData.btcBalance) ? userData.btcBalance : 0;
+            ethBalance = Number.isFinite(userData.ethBalance) ? userData.ethBalance : 0;
             transactions = userData.transactions || [];
             leveragePositions = userData.leveragePositions || [];
             userTimezone = userData.timezone || 'UTC';
             
             console.log('Settings: Final values after loading:', {
-                usdBalance, btcBalance, transactionsCount: transactions.length, 
+                usdBalance, btcBalance, ethBalance, transactionsCount: transactions.length, 
                 leveragePositionsCount: leveragePositions.length, userTimezone
             });
             
@@ -231,14 +234,21 @@ function updateUI() {
         usdBalanceElement.textContent = `$${formattedUsdBalance}`;
     }
     
-    // Update BTC balance with percentage in navigation
+    // Update crypto balance in navigation (BTC or ETH)
     const btcBalanceElement = document.getElementById('btc-balance');
+    const cryptoLabelEl = document.getElementById('crypto-balance-label');
     if (btcBalanceElement) {
-        // Calculate BTC profit using same logic as main trading page
-        const btcProfit = calculateSpotProfitLoss()['BTC'] || { profitPercent: 0 };
-        const btcProfitText = btcProfit.profitPercent !== 0 ? 
-            ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
-        btcBalanceElement.innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
+        // Get current market from localStorage to determine which balance to show
+        const currentMarket = localStorage.getItem('selectedMarket') || 'BTC/USDT';
+        const [crypto] = currentMarket.split('/');
+        
+        if (crypto === 'ETH') {
+            if (cryptoLabelEl) cryptoLabelEl.textContent = 'ETH Balance';
+            btcBalanceElement.textContent = ethBalance.toFixed(8);
+        } else {
+            if (cryptoLabelEl) cryptoLabelEl.textContent = 'BTC Balance';
+            btcBalanceElement.textContent = btcBalance.toFixed(8);
+        }
     }
     
     // Update settings page elements if they exist

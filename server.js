@@ -80,19 +80,19 @@ const JWT_SECRET = (() => {
     return secret;
 })();
 
-// Rate limiting configuration
+// Rate limiting configuration - more flexible
 const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // limit each IP to 1000 requests per windowMs
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 5 * 60 * 1000, // 5 minutes (reduced from 15)
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 2000, // 2000 requests per 5 minutes (increased)
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
 });
 
-// Auth rate limiter (stricter)
+// Auth rate limiter (more flexible)
 const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // limit each IP to 5 requests per windowMs
+    windowMs: 5 * 60 * 1000, // 5 minutes (reduced from 15)
+    max: 20, // 20 auth attempts per 5 minutes (increased from 5)
     message: 'Too many authentication attempts, please try again later.',
     skipSuccessfulRequests: true,
 });
@@ -1292,63 +1292,124 @@ app.get('/api/candles/:interval', async (req, res) => {
                 bar = '1m';
         }
         
-        // Step 1: Get ALL available data from database
+        // Step 1: Get database data (skip aggregation for long timeframes due to insufficient data)
         let dbCandles = [];
-        try {
-            // Get ALL candles from DB (up to 10000)
-            const allDbCandles = await dataScheduler.getAllStoredData(market, unit);
-            
-            if (allDbCandles && allDbCandles.length > 0) {
-                dbCandles = allDbCandles
-                    .map(candle => ({
-                        time: Math.floor(candle.timestamp / 1000),
-                        open: parseFloat(candle.open),
-                        high: parseFloat(candle.high),
-                        low: parseFloat(candle.low),
-                        close: parseFloat(candle.close),
-                        volume: parseFloat(candle.volume)
-                    }))
-                    .sort((a, b) => a.time - b.time); // Sort by time ascending
+        
+        // For 1D and 4H, skip DB aggregation and use API data only (insufficient 1m data for aggregation)
+        const skipDBForLongTimeframes = ['1d', '4h'].includes(interval);
+        
+        if (!skipDBForLongTimeframes) {
+            try {
+                // Get ALL candles from DB (up to 10000)
+                const allDbCandles = await dataScheduler.getAllStoredData(market, unit);
                 
+                if (allDbCandles && allDbCandles.length > 0) {
+                    dbCandles = allDbCandles
+                        .map(candle => ({
+                            time: Math.floor(candle.timestamp / 1000),
+                            open: parseFloat(candle.open),
+                            high: parseFloat(candle.high),
+                            low: parseFloat(candle.low),
+                            close: parseFloat(candle.close),
+                            volume: parseFloat(candle.volume)
+                        }))
+                        .filter(candle => !isNaN(candle.time) && !isNaN(candle.open) && !isNaN(candle.high) && !isNaN(candle.low) && !isNaN(candle.close) && !isNaN(candle.volume))
+                        .sort((a, b) => a.time - b.time); // Sort by time ascending
+                    
+                    console.log(`Processed ${dbCandles.length} valid candles from DB for ${market} ${interval}`);
+                }
+            } catch (dbError) {
+                logger.debug('Database fetch error:', dbError.message);
             }
-        } catch (dbError) {
-            logger.debug('Database fetch error:', dbError.message);
+        } else {
+            console.log(`Skipping DB aggregation for ${interval} due to insufficient 1m data, using API only`);
         }
         
-        // Step 2: Get latest candles from API to fill any gaps
+        // Step 2: Get more historical data from API (multiple requests if needed)
         let apiCandles = [];
         try {
-            const apiLimit = Math.min(200, limit); // OKX API max is 200
-            const endpoint = `https://www.okx.com/api/v5/market/history-candles?instId=${market}&bar=${bar}&limit=${apiLimit}`;
-            const response = await axios.get(endpoint);
+            // Calculate how many API requests we need (max 200 per request)
+            const requestsNeeded = Math.ceil(limit / 200);
+            const maxRequests = Math.min(requestsNeeded, 5); // Limit to 5 requests (1000 candles)
             
-            apiCandles = response.data.data.reverse().map(candle => ({
-                time: Math.floor(parseInt(candle[0]) / 1000),
-                open: parseFloat(candle[1]),
-                high: parseFloat(candle[2]),
-                low: parseFloat(candle[3]),
-                close: parseFloat(candle[4]),
-                volume: parseFloat(candle[5])
-            }));
+            console.log(`Will fetch up to ${maxRequests * 200} candles from API for ${market} ${interval}`);
+            
+            for (let i = 0; i < maxRequests; i++) {
+                try {
+                    // For subsequent requests, we need to specify 'after' parameter
+                    let endpoint = `https://www.okx.com/api/v5/market/history-candles?instId=${market}&bar=${bar}&limit=200`;
+                    
+                    if (apiCandles.length > 0) {
+                        // Get older data by using the timestamp of the oldest candle
+                        const oldestTime = apiCandles[0].time * 1000;
+                        endpoint += `&after=${oldestTime}`;
+                    }
+                    
+                    const response = await axios.get(endpoint);
+                    
+                    if (response.data && response.data.data && response.data.data.length > 0) {
+                        const newCandles = response.data.data.reverse().map(candle => ({
+                            time: Math.floor(parseInt(candle[0]) / 1000),
+                            open: parseFloat(candle[1]),
+                            high: parseFloat(candle[2]),
+                            low: parseFloat(candle[3]),
+                            close: parseFloat(candle[4]),
+                            volume: parseFloat(candle[5])
+                        }));
+                        
+                        // Prepend older candles to the beginning
+                        apiCandles = [...newCandles, ...apiCandles];
+                        
+                        console.log(`Fetched batch ${i + 1}: ${newCandles.length} candles`);
+                        
+                        // If we got less than 200, no more data available
+                        if (newCandles.length < 200) {
+                            break;
+                        }
+                        
+                        // Small delay between requests to avoid rate limiting
+                        if (i < maxRequests - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                    } else {
+                        break;
+                    }
+                } catch (batchError) {
+                    console.log(`Batch ${i + 1} failed:`, batchError.message);
+                    break;
+                }
+            }
+            
+            console.log(`Total fetched: ${apiCandles.length} candles from OKX API for ${market} ${interval}`);
             
         } catch (apiError) {
             logger.debug('API fetch error (using DB only):', apiError.message);
         }
         
-        // Step 3: Merge data - DB data + new API data (avoiding duplicates)
-        let mergedCandles = [...dbCandles];
+        // Step 3: Merge data - combine historical API data with recent DB data
+        let mergedCandles = [];
         
-        if (apiCandles.length > 0) {
-            const latestDbTime = dbCandles.length > 0 ? dbCandles[dbCandles.length - 1].time : 0;
+        if (apiCandles.length > 0 && dbCandles.length > 0) {
+            // Find the overlap point
+            const earliestDbTime = dbCandles[0].time;
+            const latestDbTime = dbCandles[dbCandles.length - 1].time;
             
-            // Add only newer candles from API
-            const newApiCandles = apiCandles.filter(c => c.time > latestDbTime);
-            if (newApiCandles.length > 0) {
-                mergedCandles = [...dbCandles, ...newApiCandles];
-                
-                // Save new candles to database for future use
-                if (dataScheduler && dataScheduler.collector && newApiCandles.length > 0) {
-                    const candlesToSave = newApiCandles.map(c => ({
+            // Get older API candles (before DB data)
+            const olderApiCandles = apiCandles.filter(c => c.time < earliestDbTime);
+            
+            // Get newer API candles (after DB data) 
+            const newerApiCandles = apiCandles.filter(c => c.time > latestDbTime);
+            
+            // Merge: older API data + DB data + newer API data
+            mergedCandles = [...olderApiCandles, ...dbCandles, ...newerApiCandles];
+            
+            console.log(`Merged: ${olderApiCandles.length} older API + ${dbCandles.length} DB + ${newerApiCandles.length} newer API = ${mergedCandles.length} total`);
+            
+            // Save both older and newer candles to database for future use
+            if (dataScheduler && dataScheduler.collector) {
+                const allNewCandles = [...olderApiCandles, ...newerApiCandles];
+                if (allNewCandles.length > 0) {
+                    const candlesToSave = allNewCandles.map(c => ({
                         instId: market,
                         timestamp: c.time * 1000,
                         open: c.open,
@@ -1360,13 +1421,17 @@ app.get('/api/candles/:interval', async (req, res) => {
                         bar: bar
                     }));
                     dataScheduler.collector.saveCandles(candlesToSave, bar);
+                    console.log(`Saved ${candlesToSave.length} candles to DB (${olderApiCandles.length} older + ${newerApiCandles.length} newer)`);
                 }
             }
-            
-            // If DB was empty, use all API candles
-            if (dbCandles.length === 0 && apiCandles.length > 0) {
-                mergedCandles = apiCandles;
-            }
+        } else if (dbCandles.length > 0) {
+            // Only DB data available
+            mergedCandles = dbCandles;
+            console.log(`Using ${dbCandles.length} candles from DB only`);
+        } else if (apiCandles.length > 0) {
+            // Only API data available
+            mergedCandles = apiCandles;
+            console.log(`Using ${apiCandles.length} candles from API only`);
         }
         
         // Sort and send final result
@@ -1383,6 +1448,20 @@ app.get('/api/candles/:interval', async (req, res) => {
     } catch (error) {
         console.error('Failed to fetch candles:', error);
         res.status(500).json(createAPIResponse.error('Failed to fetch candle data', null, 500));
+    }
+});
+
+// Delete all market data endpoint (admin only)
+app.delete('/api/candles/all', async (req, res) => {
+    try {
+        const { pool } = require('./database');
+        await pool.query('TRUNCATE TABLE candles RESTART IDENTITY;');
+        
+        console.log('All market data deleted successfully');
+        res.json(createAPIResponse.success(null, 'All market data deleted successfully'));
+    } catch (error) {
+        console.error('Failed to delete market data:', error);
+        res.status(500).json(createAPIResponse.error('Failed to delete market data', null, 500));
     }
 });
 

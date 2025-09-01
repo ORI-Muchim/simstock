@@ -3,6 +3,8 @@
  * Handles follow/following functionality and social interactions
  */
 
+
+
 // Check if user is logged in before initializing
 async function checkLoginStatus() {
     const token = localStorage.getItem('token');
@@ -68,6 +70,12 @@ class SocialHub {
             // Load initial data
             await this.loadSocialStats();
             await this.loadTabContent('following');
+            
+            // Periodically refresh balance
+            setInterval(async () => {
+                await this.refreshBalance();
+            }, 10000); // Refresh every 10 seconds
+            
         } catch (error) {
             console.error('Failed to initialize social hub:', error);
             this.showError('Failed to initialize social features');
@@ -85,7 +93,20 @@ class SocialHub {
 
             if (response.ok) {
                 const data = await response.json();
-                this.currentUser = data.data;
+                console.log('Social: Raw API response:', JSON.stringify(data, null, 2));
+                
+                // Handle both old and new API response formats
+                const userData = data.data || data;
+                console.log('Social: Processed user data:', JSON.stringify(userData, null, 2));
+                console.log('Social: Available fields in userData:', Object.keys(userData));
+                console.log('Social: USD Balance from server:', userData.usdBalance, 'Type:', typeof userData.usdBalance);
+                console.log('Social: BTC Balance from server:', userData.btcBalance, 'Type:', typeof userData.btcBalance);
+                console.log('Social: ETH Balance from server:', userData.ethBalance, 'Type:', typeof userData.ethBalance);
+                
+                this.currentUser = userData;
+                
+                // Update balance display
+                this.updateBalanceDisplay(userData);
             } else {
                 throw new Error('Failed to get user data');
             }
@@ -95,6 +116,70 @@ class SocialHub {
             if (error.status === 401) {
                 window.location.href = '/login';
             }
+        }
+    }
+
+    updateBalanceDisplay(userData) {
+        console.log('Social: updateBalanceDisplay called with userData keys:', Object.keys(userData));
+        
+        // Update USDT balance (using krw-balance ID in social.html)
+        const usdBalanceEl = document.getElementById('krw-balance');
+        console.log('Social: usdBalanceEl found:', !!usdBalanceEl);
+        console.log('Social: userData.usdBalance:', userData.usdBalance);
+        
+        if (usdBalanceEl && userData.usdBalance !== undefined) {
+            const formattedBalance = `$${parseFloat(userData.usdBalance).toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            })}`;
+            console.log('Social: Setting USD balance to:', formattedBalance);
+            usdBalanceEl.textContent = formattedBalance;
+        } else {
+            console.log('Social: USD balance not updated - Element:', !!usdBalanceEl, 'Data:', userData.usdBalance);
+        }
+
+        // Update crypto balance (BTC or ETH) with profit/loss percentage
+        const btcBalanceEl = document.getElementById('btc-balance');
+        const cryptoLabelEl = document.getElementById('crypto-balance-label');
+        
+        // Get current market from localStorage to determine which balance to show
+        const currentMarket = localStorage.getItem('selectedMarket') || 'BTC/USDT';
+        const [crypto] = currentMarket.split('/');
+        
+        if (btcBalanceEl && cryptoLabelEl) {
+            if (crypto === 'ETH') {
+                cryptoLabelEl.textContent = 'ETH Balance';
+                if (userData.ethBalance !== undefined) {
+                    btcBalanceEl.textContent = parseFloat(userData.ethBalance).toFixed(8);
+                }
+            } else {
+                cryptoLabelEl.textContent = 'BTC Balance';
+                if (userData.btcBalance !== undefined) {
+                    btcBalanceEl.textContent = parseFloat(userData.btcBalance).toFixed(8);
+                }
+            }
+        }
+    }
+
+    async refreshBalance() {
+        try {
+            const response = await fetch('/api/user/data', {
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // Handle both old and new API response formats
+                const userData = data.data || data;
+                console.log('Social: Balance refresh - USD:', userData.usdBalance);
+                this.updateBalanceDisplay(userData);
+            }
+        } catch (error) {
+            console.error('Error refreshing balance:', error);
+            // Don't show error to user for background refresh
         }
     }
 
@@ -134,6 +219,11 @@ class SocialHub {
                 this.loadActivities();
             }
         }, 30000); // Refresh every 30 seconds
+
+        // Setup periodic balance refresh
+        setInterval(() => {
+            this.refreshBalance();
+        }, 10000); // Refresh balance every 10 seconds
     }
 
     async switchTab(tabName) {

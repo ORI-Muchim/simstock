@@ -104,19 +104,43 @@ const initializeAlertTables = async () => {
 // Initialize social tables for follow/following functionality
 const initializeSocialTables = async () => {
     try {
-        // Create follows table for follow/following relationships
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS follows (
-                id SERIAL PRIMARY KEY,
-                follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(follower_id, followed_id),
-                CHECK (follower_id != followed_id)
-            )
+        // Check if follows table exists and what columns it has
+        const tableCheck = await pool.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'follows' AND table_schema = 'public'
         `);
 
-        // Create index for faster queries
+        if (tableCheck.rows.length === 0) {
+            // Table doesn't exist, create it
+            await pool.query(`
+                CREATE TABLE follows (
+                    id SERIAL PRIMARY KEY,
+                    follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(follower_id, followed_id),
+                    CHECK (follower_id != followed_id)
+                )
+            `);
+        } else {
+            // Table exists, check if it has the correct columns
+            const columns = tableCheck.rows.map(row => row.column_name);
+            
+            if (!columns.includes('followed_id') && columns.includes('following_id')) {
+                // Rename following_id to followed_id
+                await pool.query(`ALTER TABLE follows RENAME COLUMN following_id TO followed_id`);
+                logger.info('Renamed following_id to followed_id in follows table');
+            } else if (!columns.includes('followed_id')) {
+                // Add the followed_id column if it doesn't exist
+                await pool.query(`
+                    ALTER TABLE follows ADD COLUMN followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
+                `);
+                logger.info('Added followed_id column to follows table');
+            }
+        }
+
+        // Create indexes for faster queries
         await pool.query(`
             CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id)
         `);
@@ -414,15 +438,123 @@ const saveCandles = async (candles, bar) => {
 
 const getCandles = async (instId, bar, limit = 1000) => {
     try {
+        // For 1-minute candles, return directly from database
+        if (bar === '1m') {
+            const result = await pool.query(`
+                SELECT * FROM candles 
+                WHERE inst_id = $1 AND bar = $2 
+                ORDER BY timestamp DESC 
+                LIMIT $3
+            `, [instId, bar, limit]);
+            
+            return result.rows.reverse(); // Return in ascending order
+        }
+        
+        // For other timeframes, aggregate from 1-minute candles
+        const aggregatedCandles = await getAggregatedCandles(instId, bar, limit);
+        return aggregatedCandles;
+    } catch (error) {
+        throw error;
+    }
+};
+
+// Aggregate 1-minute candles to create higher timeframe candles
+const getAggregatedCandles = async (instId, bar, limit = 1000) => {
+    try {
+        // Define interval in minutes for each bar type
+        const intervalMap = {
+            '3m': 3,
+            '5m': 5,
+            '10m': 10,
+            '15m': 15,
+            '30m': 30,
+            '1H': 60,
+            '4H': 240,
+            '1D': 1440
+        };
+        
+        const intervalMinutes = intervalMap[bar];
+        if (!intervalMinutes) {
+            return [];
+        }
+        
+        // Calculate how many 1-minute candles we need
+        const minuteCandlesNeeded = limit * intervalMinutes;
+        
+        // Get 1-minute candles from database
         const result = await pool.query(`
             SELECT * FROM candles 
-            WHERE inst_id = $1 AND bar = $2 
+            WHERE inst_id = $1 AND bar = '1m'
             ORDER BY timestamp DESC 
-            LIMIT $3
-        `, [instId, bar, limit]);
+            LIMIT $2
+        `, [instId, minuteCandlesNeeded]);
         
-        return result.rows.reverse(); // Return in ascending order
+        if (result.rows.length === 0) {
+            return [];
+        }
+        
+        // Sort by timestamp ascending for aggregation
+        const minuteCandles = result.rows.reverse();
+        
+        // Aggregate candles by time intervals
+        const aggregatedCandles = [];
+        const intervalMs = intervalMinutes * 60 * 1000;
+        
+        // Group candles by time intervals
+        const candleGroups = new Map();
+        
+        for (const candle of minuteCandles) {
+            const candleTime = parseInt(candle.timestamp);
+            let intervalStart;
+            
+            if (bar === '1D') {
+                // For daily candles, align to UTC midnight
+                const date = new Date(candleTime);
+                date.setUTCHours(0, 0, 0, 0);
+                intervalStart = date.getTime();
+            } else {
+                // For other intervals, use regular interval calculation
+                intervalStart = Math.floor(candleTime / intervalMs) * intervalMs;
+            }
+            
+            if (!candleGroups.has(intervalStart)) {
+                candleGroups.set(intervalStart, []);
+            }
+            candleGroups.get(intervalStart).push(candle);
+        }
+        
+        // Convert groups to aggregated candles
+        for (const [intervalStart, candlesInInterval] of candleGroups) {
+            if (candlesInInterval.length === 0) continue;
+            
+            // Sort candles in this interval by timestamp
+            candlesInInterval.sort((a, b) => a.timestamp - b.timestamp);
+            
+            const firstCandle = candlesInInterval[0];
+            const lastCandle = candlesInInterval[candlesInInterval.length - 1];
+            
+            const aggregated = {
+                inst_id: instId,
+                bar: bar,
+                timestamp: intervalStart,
+                open: parseFloat(firstCandle.open),
+                high: Math.max(...candlesInInterval.map(c => parseFloat(c.high))),
+                low: Math.min(...candlesInInterval.map(c => parseFloat(c.low))),
+                close: parseFloat(lastCandle.close),
+                volume: candlesInInterval.reduce((sum, c) => sum + parseFloat(c.volume || 0), 0),
+                vol_ccy: candlesInInterval.reduce((sum, c) => sum + parseFloat(c.vol_ccy || 0), 0)
+            };
+            
+            aggregatedCandles.push(aggregated);
+        }
+        
+        // Sort by timestamp and limit results
+        aggregatedCandles.sort((a, b) => a.timestamp - b.timestamp);
+        
+        // Limit the result
+        return aggregatedCandles.slice(-limit);
     } catch (error) {
+        console.error('Error aggregating candles:', error);
         throw error;
     }
 };

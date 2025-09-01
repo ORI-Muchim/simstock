@@ -5,15 +5,17 @@ let isLoggedIn = false;
 let transactions = [];
 let usdBalance = 10000;
 let btcBalance = 0;
+let ethBalance = 0;
 let currentPrice = 0;
 let assetChart = null;
 let assetTrendSeries = null;
 let userTimezone = 'UTC'; // Default timezone
 
+
 // Initialize application
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('History page loaded, initializing...');
-    checkLoginStatus();
+    await checkLoginStatus();
 });
 
 // Check if user is logged in
@@ -153,10 +155,11 @@ async function loadUserData() {
             
             usdBalance = Number.isFinite(userData.usdBalance) ? userData.usdBalance : 10000;
             btcBalance = Number.isFinite(userData.btcBalance) ? userData.btcBalance : 0;
+            ethBalance = Number.isFinite(userData.ethBalance) ? userData.ethBalance : 0;
             transactions = userData.transactions || [];
             userTimezone = userData.timezone || 'UTC';
             
-            console.log('History: Final balances - USD:', usdBalance, 'BTC:', btcBalance);
+            console.log('History: Final balances - USD:', usdBalance, 'BTC:', btcBalance, 'ETH:', ethBalance);
             
         } else if (response.status === 401) {
             // Token expired or invalid
@@ -173,72 +176,6 @@ async function loadUserData() {
     }
 }
 
-// Calculate spot profit/loss for each cryptocurrency (same logic as main trading page)
-function calculateSpotProfitLoss() {
-    const spotProfits = {};
-    
-    // Process each market (assuming BTC for now)
-    ['BTC-USDT'].forEach(market => {
-        const [crypto] = market.split('-');
-        const currentBalance = btcBalance;
-        
-        if (currentBalance <= 0) {
-            spotProfits[crypto] = {
-                totalInvested: 0,
-                currentValue: 0,
-                profit: 0,
-                profitPercent: 0,
-                averageBuyPrice: 0
-            };
-            return;
-        }
-        
-        // Calculate average buy price from transactions (time-ordered)
-        const relevantTransactions = transactions.filter(tx => 
-            (tx.market === market || tx.market === `${crypto}/USDT` || tx.type === 'buy' || tx.type === 'sell') &&
-            (tx.type === 'buy' || tx.type === 'sell')
-        ).sort((a, b) => new Date(a.time) - new Date(b.time));
-        
-        let runningBalance = 0;
-        let averageBuyPrice = 0;
-        
-        // Process transactions in chronological order
-        relevantTransactions.forEach((tx) => {
-            if (tx.type === 'buy') {
-                // Calculate new weighted average buy price
-                const newBalance = runningBalance + (tx.amount || 0);
-                if (newBalance > 0) {
-                    averageBuyPrice = ((averageBuyPrice * runningBalance) + ((tx.price || 0) * (tx.amount || 0))) / newBalance;
-                }
-                runningBalance = newBalance;
-            } else if (tx.type === 'sell') {
-                // Sell reduces balance but keeps average buy price unchanged
-                runningBalance -= (tx.amount || 0);
-                if (runningBalance <= 0) {
-                    runningBalance = 0;
-                    averageBuyPrice = 0;
-                }
-            }
-        });
-        
-        // Use a placeholder current price (in real implementation, this would come from WebSocket)
-        const currentMarketPrice = 50000; // Placeholder BTC price
-        const currentValue = currentBalance * currentMarketPrice;
-        const totalInvested = currentBalance * averageBuyPrice;
-        const profit = currentValue - totalInvested;
-        const profitPercent = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
-        
-        spotProfits[crypto] = {
-            totalInvested,
-            currentValue,
-            profit,
-            profitPercent,
-            averageBuyPrice
-        };
-    });
-    
-    return spotProfits;
-}
 
 // Update balance display
 function updateBalanceDisplay() {
@@ -257,12 +194,20 @@ function updateBalanceDisplay() {
     }
     
     const btcBalanceEl = document.getElementById('btc-balance');
-    if (btcBalanceEl) {
-        // Calculate BTC profit using same logic as main trading page
-        const btcProfit = calculateSpotProfitLoss()['BTC'] || { profitPercent: 0 };
-        const btcProfitText = btcProfit.profitPercent !== 0 ? 
-            ` <span class="${btcProfit.profitPercent >= 0 ? 'profit-text' : 'loss-text'}">(${btcProfit.profitPercent >= 0 ? '+' : ''}${btcProfit.profitPercent.toFixed(1)}%)</span>` : '';
-        btcBalanceEl.innerHTML = `${btcBalance.toFixed(8)}${btcProfitText}`;
+    const cryptoLabelEl = document.getElementById('crypto-balance-label');
+    
+    // Get current market from localStorage to determine which balance to show
+    const currentMarket = localStorage.getItem('selectedMarket') || 'BTC/USDT';
+    const [crypto] = currentMarket.split('/');
+    
+    if (btcBalanceEl && cryptoLabelEl) {
+        if (crypto === 'ETH') {
+            cryptoLabelEl.textContent = 'ETH Balance';
+            btcBalanceEl.textContent = ethBalance.toFixed(8);
+        } else {
+            cryptoLabelEl.textContent = 'BTC Balance';
+            btcBalanceEl.textContent = btcBalance.toFixed(8);
+        }
     }
 }
 

@@ -88,6 +88,7 @@ let isDrawingTrendLine = false;
 let fibonacciPoints = []; // Store points for fibonacci drawing
 let isDrawingFibonacci = false;
 let maList = [{ id: 1, period: 20, type: 'sma', series: null }];
+let maLines = []; // Array to track MA series for chart updates
 let nextMaId = 2;
 const SPOT_TRADING_FEE = 0.0005; // 0.05% spot trading fee
 
@@ -96,6 +97,40 @@ const TRADING_FEES = {
     maker: 0.0002,  // 0.020% - Maker fee (limit orders that add liquidity)
     taker: 0.0005   // 0.050% - Taker fee (market orders that remove liquidity)
 };
+
+// Rate limiting utility function
+async function fetchWithRateLimit(url, options = {}, maxRetries = 3, baseDelay = 1000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            
+            if (response.status === 429) {
+                const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+                console.warn(`Rate limited (attempt ${attempt}/${maxRetries}) - waiting ${delay}ms`);
+                
+                if (attempt === maxRetries) {
+                    showToast('Server busy - please try again later', 'error');
+                    throw new Error('Rate limit exceeded - max retries reached');
+                }
+                
+                showToast(`Too many requests - retrying in ${Math.round(delay/1000)}s`, 'warning');
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+            
+            return response;
+        } catch (error) {
+            if (attempt === maxRetries) {
+                console.error('Fetch failed after max retries:', error);
+                throw error;
+            }
+            
+            const delay = baseDelay * Math.pow(2, attempt - 1);
+            console.warn(`Fetch failed (attempt ${attempt}/${maxRetries}) - retrying in ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
 
 // Get trading fee rate
 function getTradingFee(orderType = 'taker') {
@@ -215,6 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupOrderTypeSelector();
     setupMarketDropdown();
     setupTimezoneListener();
+    restoreSelectedMarket();
     
     // Initialize chat if logged in
     // console.warn('🟡 CHAT DEBUG: Attempting to initialize chat...');
@@ -311,7 +347,12 @@ function formatVolume(volume) {
 // Update markets data
 async function updateMarketsData() {
     try {
-        const response = await fetch('/api/markets');
+        const response = await fetchWithRateLimit('/api/markets');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const markets = await response.json();
         
         // Update BTC market card
@@ -454,6 +495,14 @@ function updateMarketCard(instId, data) {
 function selectMarket(market) {
     currentMarket = market;
     
+    // Save current market to localStorage
+    try {
+        localStorage.setItem('selectedMarket', market);
+        console.log('Saved market to localStorage:', market);
+    } catch (error) {
+        console.warn('Failed to save market to localStorage:', error);
+    }
+    
     // Calculate profit/loss for all cryptos
     const spotProfits = calculateSpotProfitLoss();
     
@@ -520,10 +569,17 @@ function selectMarket(market) {
         switchPage('trade');
     }
     
-    // Reset indicator button states
-    document.querySelectorAll('.indicator-btn').forEach(btn => {
-        btn.classList.remove('active');
+    // Store current active indicators before clearing chart
+    const currentActiveIndicators = {};
+    document.querySelectorAll('.indicator-btn.active').forEach(btn => {
+        if (btn.dataset.indicator) {
+            currentActiveIndicators[btn.dataset.indicator] = true;
+        }
     });
+    console.log('Stored active indicators for restoration:', currentActiveIndicators);
+    
+    // Store for later use
+    window.pendingIndicators = currentActiveIndicators;
     
     // Reset chart initialization state and reload chart with new market data
     chartInitialized = false;
@@ -531,12 +587,42 @@ function selectMarket(market) {
     // 마켓 변경 시 볼륨 데이터 플래그 리셋
     volumeDataLoaded = false;
     
+    // Clear existing chart data before loading new market data
+    if (candleSeries) {
+        candleSeries.setData([]);
+    }
+    if (volumeSeries) {
+        volumeSeries.setData([]);
+    }
+    
+    // Clear all indicators completely
+    console.log('Clearing indicators for market change...');
+    clearAllIndicators();
+    
+    // Clear MA lines
+    maLines.forEach(ma => {
+        if (ma.series) {
+            ma.series.setData([]);
+        }
+    });
+    
     if (typeof loadCandles === 'function') {
         loadCandles(currentInterval);
     }
     
-    // Subscribe to new market WebSocket updates
+    // Unsubscribe from previous market and subscribe to new market
     if (ws && ws.readyState === WebSocket.OPEN) {
+        // Get previous market (before we changed it)
+        const previousMarket = document.querySelector('.market-select-btn .symbol')?.textContent;
+        if (previousMarket && previousMarket !== market) {
+            // Unsubscribe from previous market
+            ws.send(JSON.stringify({
+                type: 'unsubscribe',
+                market: previousMarket.replace('/', '-')
+            }));
+        }
+        
+        // Subscribe to new market
         ws.send(JSON.stringify({
             type: 'subscribe',
             market: market.replace('/', '-')
@@ -613,7 +699,7 @@ async function loadInitialPriceData() {
     try {
         // Convert current market format for API call
         const apiMarket = currentMarket.replace('/', '-');
-        const response = await fetch(`/api/price/${apiMarket}`);
+        const response = await fetchWithRateLimit(`/api/price/${apiMarket}`);
         
         if (response.ok) {
             const priceData = await response.json();
@@ -672,6 +758,69 @@ async function logout() {
     
     // Immediate redirect
     window.location.href = '/login';
+}
+
+// Restore selected market from localStorage
+function restoreSelectedMarket() {
+    try {
+        const savedMarket = localStorage.getItem('selectedMarket');
+        console.log('Checking saved market from localStorage:', savedMarket);
+        
+        if (savedMarket && (savedMarket === 'BTC/USDT' || savedMarket === 'ETH/USDT')) {
+            console.log('Restoring saved market:', savedMarket);
+            
+            // Update current market without calling selectMarket to avoid recursion
+            currentMarket = savedMarket;
+            
+            // Update UI to reflect the restored market
+            const [crypto, base] = savedMarket.split('/');
+            const marketBtn = document.querySelector('.market-select-btn');
+            
+            if (marketBtn) {
+                const symbolSpan = marketBtn.querySelector('.symbol');
+                if (symbolSpan) {
+                    symbolSpan.textContent = savedMarket;
+                }
+                
+                // Update coin icon
+                const coinIcon = marketBtn.querySelector('.coin-icon');
+                if (coinIcon) {
+                    if (crypto === 'ETH') {
+                        coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png';
+                        coinIcon.alt = 'ETH';
+                        currentCryptoBalance = ethBalance;
+                        
+                        // Update balance label
+                        const cryptoLabel = document.getElementById('crypto-balance-label');
+                        if (cryptoLabel) {
+                            cryptoLabel.textContent = 'ETH Balance';
+                        }
+                    } else {
+                        coinIcon.src = 'https://s2.coinmarketcap.com/static/img/coins/64x64/1.png';
+                        coinIcon.alt = 'BTC';
+                        currentCryptoBalance = btcBalance;
+                        
+                        // Update balance label
+                        const cryptoLabel = document.getElementById('crypto-balance-label');
+                        if (cryptoLabel) {
+                            cryptoLabel.textContent = 'BTC Balance';
+                        }
+                    }
+                }
+            }
+            
+            // Update dropdown selection state
+            updateDropdownSelection();
+            
+            console.log('Market restored successfully:', savedMarket);
+        } else {
+            console.log('No valid saved market found, using default BTC/USDT');
+            currentMarket = 'BTC/USDT';
+        }
+    } catch (error) {
+        console.warn('Failed to restore market from localStorage:', error);
+        currentMarket = 'BTC/USDT';
+    }
 }
 
 // Setup timezone change listener
@@ -772,7 +921,7 @@ async function loadUserData() {
     }
     
     try {
-        const response = await fetch('/api/user/data', {
+        const response = await fetchWithRateLimit('/api/user/data', {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
@@ -829,7 +978,7 @@ async function saveUserData() {
     if (!token) return;
     
     try {
-        const response = await fetch('/api/user/data', {
+        const response = await fetchWithRateLimit('/api/user/data', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -957,24 +1106,14 @@ function initializeWebSocket() {
                         data: data.data
                     });
                     
-                    // Always update 1m candles for current market (for volume tracking)
-                    if (market === currentMarket && data.interval === '1m' && data.data) {
-                        console.log('🔥 Updating 1m candle for current market:', {
+                    // Only update candles that match both current market AND current interval
+                    if (market === currentMarket && data.interval === currentInterval && data.data) {
+                        console.log('🔥 Updating candle for current market and interval:', {
                             market,
+                            interval: data.interval,
                             volume: data.data.volume,
                             close: data.data.close
                         });
-                        // Store 1m data for volume reference
-                        if (currentInterval === '1m') {
-                            updateRealtimeCandleData(data.data);
-                        } else {
-                            // Still update volume for other intervals based on 1m data
-                            updateVolumeFromOneMinute(data.data);
-                        }
-                    }
-                    // Also update if it exactly matches current market and interval (other timeframes)
-                    else if (market === currentMarket && data.interval === currentInterval && data.data) {
-                        console.log('Updating candle for current interval:', data.interval);
                         updateRealtimeCandleData(data.data);
                     } else {
                         console.log('Skipping candle_update (different market/interval)', {
@@ -2050,7 +2189,12 @@ async function loadCandles(interval) {
                 count = 1000;
         }
         
-        const response = await fetch(`/api/candles/${interval}?market=${marketParam}&count=${count}`);
+        const response = await fetchWithRateLimit(`/api/candles/${interval}?market=${marketParam}&count=${count}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const responseData = await response.json();
         
         // Validate and extract candles data
@@ -2299,25 +2443,42 @@ async function loadCandles(interval) {
             });
         }
         
-        // Fit content
-        chart.timeScale().fitContent();
+        // Set visible range to show more candles
+        if (candleData && candleData.length > 0) {
+            const barsToShow = Math.min(100, candleData.length); // Show up to 100 candles initially
+            const from = candleData[Math.max(0, candleData.length - barsToShow)].time;
+            const to = candleData[candleData.length - 1].time;
+            
+            chart.timeScale().setVisibleRange({
+                from: from,
+                to: to + (to - from) * 0.1 // Add 10% padding on the right
+            });
+        } else {
+            // Fallback to fitContent if no data
+            chart.timeScale().fitContent();
+        }
         
         // Update position lines after loading chart
         updateAveragePriceLine();
         updateLeveragePositionLines();
         
-        // Reset indicator button states before loading settings
-        document.querySelectorAll('.indicator-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
+        // Don't reset indicator states here - they were already handled in selectMarket
         
         // Mark chart as fully initialized
         chartInitialized = true;
         
-        // Load saved chart settings
+        // Load saved chart settings with longer delay to ensure chart is fully rendered
         setTimeout(() => {
             loadChartSettings();
-        }, 300);
+        }, 500);
+        
+        // Also try to restore indicators directly after data is loaded
+        setTimeout(() => {
+            if (chartInitialized && candleData && candleData.length > 0) {
+                console.log('Attempting direct indicator restoration after data load');
+                restoreActiveIndicators();
+            }
+        }, 800);
         
         console.log('Historical candles loaded successfully from database');
     } catch (error) {
@@ -2874,8 +3035,8 @@ function updateIndicatorsRealtime() {
             }
         }
         
-        // Update Stochastic
-        if (indicators.stochastic.k) {
+        // Update Stochastic (if indicator exists)
+        if (indicators.stochastic && indicators.stochastic.k) {
             const stochData = calculateStochastic(candleData, 
                 indicatorSettings.stochastic.k, 
                 indicatorSettings.stochastic.d, 
@@ -3277,6 +3438,10 @@ function switchTimeframe(interval) {
     
     // Clean up any legacy global volume tracking variables
     cleanupVolumeTracking();
+    
+    // 🚨 Clear all indicators before loading new timeframe data
+    console.log('Clearing all indicators for timeframe change');
+    clearAllIndicators();
     
     // Update button states (updated for new UI)
     document.querySelectorAll('.tf-btn').forEach(btn => {
@@ -4581,7 +4746,7 @@ async function savePositionStopOrders() {
         if (token) {
             // Create or update stop orders on server
             if (stopLossEnabled) {
-                await fetch('/api/stop-orders', {
+                await fetchWithRateLimit('/api/stop-orders', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -4599,7 +4764,7 @@ async function savePositionStopOrders() {
             }
             
             if (takeProfitEnabled) {
-                await fetch('/api/stop-orders', {
+                await fetchWithRateLimit('/api/stop-orders', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -4830,7 +4995,7 @@ async function openLeveragePosition() {
         const token = localStorage.getItem('token');
         if (stopLossEnabled && stopLossPrice && token) {
             try {
-                await fetch('/api/stop-orders', {
+                await fetchWithRateLimit('/api/stop-orders', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -4852,7 +5017,7 @@ async function openLeveragePosition() {
         
         if (takeProfitEnabled && takeProfitPrice && token) {
             try {
-                await fetch('/api/stop-orders', {
+                await fetchWithRateLimit('/api/stop-orders', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -6141,9 +6306,46 @@ function updateLeveragePositionLines() {
     });
 }
 
+// Restore active indicators based on stored state
+function restoreActiveIndicators() {
+    console.log('Restoring indicators based on stored state...');
+    const pendingIndicators = window.pendingIndicators || {};
+    
+    console.log('Pending indicators to restore:', pendingIndicators);
+    
+    let restoredCount = 0;
+    for (const [indicatorName, isActive] of Object.entries(pendingIndicators)) {
+        if (isActive && indicatorName !== 'volume') {
+            console.log(`Restoring indicator: ${indicatorName}`);
+            const button = document.querySelector(`[data-indicator="${indicatorName}"]`);
+            if (button) {
+                button.classList.add('active');
+                toggleIndicator(indicatorName, true);
+                restoredCount++;
+            }
+        }
+    }
+    
+    console.log(`Restored ${restoredCount} indicators`);
+    
+    // Clear pending indicators after restoration
+    window.pendingIndicators = {};
+}
+
 // Toggle indicator function
 function toggleIndicator(indicator, isActive) {
-    if (!chart || !candleSeries || !candleData.length) return;
+    console.log(`toggleIndicator called: ${indicator}, isActive: ${isActive}`);
+    console.log('Chart status:', !!chart, 'CandleSeries:', !!candleSeries, 'CandleData length:', candleData ? candleData.length : 0);
+    
+    if (!chart || !candleSeries) {
+        console.log('Chart not ready for indicator toggle:', indicator);
+        return;
+    }
+    
+    if (!candleData || !candleData.length) {
+        console.log('No candle data available for indicator:', indicator);
+        return;
+    }
     
     switch (indicator) {
         case 'ma':
@@ -6197,6 +6399,39 @@ function toggleIndicator(indicator, isActive) {
     // Update button states
     updateIndicatorButtonStates();
     // Note: Saving is handled at the button click level
+}
+
+// Clear all indicators (for timeframe switching)
+function clearAllIndicators() {
+    try {
+        // Remove all standard indicators
+        Object.keys(indicators).forEach(indicatorType => {
+            if (indicatorType !== 'volume' && indicators[indicatorType]) {
+                removeIndicator(indicatorType);
+            }
+        });
+        
+        // Clear MA lines
+        if (maLines && maLines.length > 0) {
+            maLines.forEach(ma => {
+                if (ma.series) {
+                    try {
+                        chart.removeSeries(ma.series);
+                    } catch (error) {
+                        console.warn('Error removing MA series:', error);
+                    }
+                    ma.series = null;
+                }
+            });
+            maLines.length = 0;
+        }
+        
+        // Don't reset button states here - they should be preserved for restoration
+        
+        console.log('All indicators cleared successfully');
+    } catch (error) {
+        console.error('Error clearing indicators:', error);
+    }
 }
 
 // Remove indicator
@@ -6571,22 +6806,34 @@ function addEMA() {
 function addBollingerBands() {
     if (indicators.bollinger.upper) return;
     
+    // Ensure chart is ready before adding indicators
+    if (!chart || !chartInitialized || !candleData || candleData.length === 0) {
+        console.warn('Chart not ready for Bollinger Bands');
+        return;
+    }
+    
     const bbData = calculateBollingerBands(candleData, indicatorSettings.bollinger.period, indicatorSettings.bollinger.std);
     
     indicators.bollinger.upper = chart.addLineSeries({
         color: '#2196F3',
         lineWidth: 1,
-        title: `BB Upper(${indicatorSettings.bollinger.period},${indicatorSettings.bollinger.std})`
+        title: `BB Upper(${indicatorSettings.bollinger.period},${indicatorSettings.bollinger.std})`,
+        priceScaleId: 'right', // Ensure proper scale positioning
+        lastValueVisible: false
     });
     indicators.bollinger.middle = chart.addLineSeries({
         color: '#FF5252',
         lineWidth: 1,
-        title: `BB Middle(${indicatorSettings.bollinger.period})`
+        title: `BB Middle(${indicatorSettings.bollinger.period})`,
+        priceScaleId: 'right',
+        lastValueVisible: false
     });
     indicators.bollinger.lower = chart.addLineSeries({
         color: '#2196F3',
         lineWidth: 1,
-        title: `BB Lower(${indicatorSettings.bollinger.period},${indicatorSettings.bollinger.std})`
+        title: `BB Lower(${indicatorSettings.bollinger.period},${indicatorSettings.bollinger.std})`,
+        priceScaleId: 'right',
+        lastValueVisible: false
     });
     
     indicators.bollinger.upper.setData(bbData.upper);
@@ -7351,7 +7598,7 @@ async function saveChartSettings() {
             };
         }
 
-        const response = await fetch('/api/chart/settings', {
+        const response = await fetchWithRateLimit('/api/chart/settings', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -7376,7 +7623,7 @@ async function loadChartSettings() {
     }
 
     try {
-        const response = await fetch(`/api/chart/settings/${encodeURIComponent(currentMarket)}`, {
+        const response = await fetchWithRateLimit(`/api/chart/settings/${encodeURIComponent(currentMarket)}`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -7412,19 +7659,42 @@ async function loadChartSettings() {
                 
                 // Restore active indicators
                 if (settings.indicators) {
-                    // Activate all indicators at once after a short delay for chart initialization
-                    setTimeout(() => {
+                    console.log('Loading saved indicators:', settings.indicators);
+                    
+                    // Function to restore indicators with retry logic
+                    const restoreIndicators = () => {
+                        console.log('Attempting to restore indicators...');
+                        console.log('Chart ready:', !!chart);
+                        console.log('Candle data ready:', candleData && candleData.length > 0);
+                        
+                        if (!chart || !candleData || candleData.length === 0) {
+                            console.log('Chart or data not ready, retrying in 500ms...');
+                            setTimeout(restoreIndicators, 500);
+                            return;
+                        }
+                        
                         for (const [indicatorName, isActive] of Object.entries(settings.indicators)) {
-                            if (isActive) {
-                                toggleIndicator(indicatorName, true);
+                            if (isActive && indicatorName !== 'volume') {
+                                console.log(`Restoring indicator: ${indicatorName}`);
+                                const button = document.querySelector(`[data-indicator="${indicatorName}"]`);
+                                if (button) {
+                                    button.classList.add('active');
+                                    toggleIndicator(indicatorName, true);
+                                }
                             }
                         }
                         
                         // Update all button states once after all indicators are applied
                         setTimeout(() => {
                             updateIndicatorButtonStates();
-                        }, 100);
-                    }, 200);
+                            console.log('All indicators restored successfully');
+                        }, 300);
+                    };
+                    
+                    // Start restoration with initial delay
+                    setTimeout(restoreIndicators, 1200);
+                } else {
+                    console.log('No indicators in saved settings');
                 }
             } else {
                 console.log('No settings found in response');

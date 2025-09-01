@@ -56,7 +56,14 @@
       "Bash(\"C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe\" -U postgres -h localhost -d cryptosim -c \"\nCREATE TABLE IF NOT EXISTS follows (\n    id SERIAL PRIMARY KEY,\n    follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    UNIQUE(follower_id, followed_id),\n    CHECK (follower_id != followed_id)\n);\n\")",
       "Bash(DB_PASSWORD=REDACTED_PASSWORD npm start)",
       "Bash(DB_PASSWORD=REDACTED_PASSWORD node create_social_tables.js)",
-      "Bash(open http://localhost:3000/social)"
+      "Bash(open http://localhost:3000/social)",
+      "Bash(\"C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe\" -U postgres -h localhost -d cryptosim -c \"\\d follows\")",
+      "Bash(\"C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe\" -U postgres -h localhost -d cryptosim -c \"\\d follows\")",
+      "Bash(DB_PASSWORD=REDACTED_PASSWORD node server.js)",
+      "Bash(PORT=3001 DB_PASSWORD=REDACTED_PASSWORD npm start)",
+      "Bash(start http://localhost:3000/social)",
+      "Bash(start http://localhost:3000/history)",
+      "Bash(start http://localhost:3000/login)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

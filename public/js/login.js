@@ -20,6 +20,39 @@ function switchTab(tab, targetBtn) {
     hideMessages();
 }
 
+// Rate limiting utility function for login page
+async function fetchWithRetry(url, options = {}, maxRetries = 2, baseDelay = 3000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            
+            if (response.status === 429) {
+                if (attempt === maxRetries) {
+                    throw new Error('RATE_LIMITED');
+                }
+                
+                const delay = baseDelay * attempt;
+                showError(`Too many requests. Retrying in ${Math.round(delay/1000)} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+            
+            return response;
+        } catch (error) {
+            if (error.message === 'RATE_LIMITED') {
+                throw error;
+            }
+            if (attempt === maxRetries) {
+                throw error;
+            }
+            
+            const delay = baseDelay * attempt;
+            showError(`Connection failed. Retrying in ${Math.round(delay/1000)} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
+
 function showError(message) {
     const errorDiv = document.getElementById('error-message');
     errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
@@ -79,11 +112,22 @@ async function handleLogin(event) {
 
         console.log('Login response status:', response.status);
         
+        // Handle rate limiting specifically
+        if (response.status === 429) {
+            showError('Too many login attempts. Please wait a few minutes and try again.');
+            return;
+        }
+        
         let data;
         try {
             data = await response.json();
         } catch (parseError) {
             console.error('Failed to parse response JSON:', parseError);
+            // For rate limiting, the response might not be JSON
+            if (response.status === 429) {
+                showError('Too many login attempts. Please wait a few minutes and try again.');
+                return;
+            }
             throw new Error('Invalid response from server');
         }
 
@@ -164,11 +208,22 @@ async function handleRegister(event) {
 
         console.log('Registration response status:', response.status);
 
+        // Handle rate limiting specifically
+        if (response.status === 429) {
+            showError('Too many registration attempts. Please wait a few minutes and try again.');
+            return;
+        }
+
         let data;
         try {
             data = await response.json();
         } catch (parseError) {
             console.error('Failed to parse response JSON:', parseError);
+            // For rate limiting, the response might not be JSON
+            if (response.status === 429) {
+                showError('Too many registration attempts. Please wait a few minutes and try again.');
+                return;
+            }
             throw new Error('Invalid response from server');
         }
 

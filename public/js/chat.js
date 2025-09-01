@@ -6,10 +6,27 @@ let isChatOpen = false;
 let onlineUsers = 0;
 let selectedSuggestionIndex = -1;
 
+// Initialize unread count from localStorage
+function initializeUnreadCount() {
+    const storedCount = localStorage.getItem('chatUnreadCount');
+    if (storedCount) {
+        unreadCount = parseInt(storedCount) || 0;
+        updateNotificationBadge();
+    }
+}
+
+// Save unread count to localStorage
+function saveUnreadCount() {
+    localStorage.setItem('chatUnreadCount', unreadCount.toString());
+}
+
 // Initialize chat when DOM is loaded
 document.addEventListener('DOMContentLoaded', initializeChat);
 
 function initializeChat() {
+    // Initialize unread count from localStorage
+    initializeUnreadCount();
+    
     // Get elements
     const chatToggle = document.getElementById('chat-toggle');
     const chatContainer = document.getElementById('chat-container');
@@ -25,6 +42,7 @@ function initializeChat() {
             isChatOpen = true;
             chatContainer.classList.add('active');
             unreadCount = 0;
+            saveUnreadCount();
             updateNotificationBadge();
             setTimeout(() => chatInput.focus(), 350);
             // Connect to chat if not connected
@@ -251,6 +269,7 @@ function handleChatMessage(data) {
             // Update unread count if chat is closed
             if (!isChatOpen) {
                 unreadCount++;
+                saveUnreadCount();
                 updateNotificationBadge();
             }
             break;
@@ -542,8 +561,10 @@ function updateNotificationBadge() {
     if (notificationElement) {
         if (unreadCount > 0) {
             notificationElement.textContent = unreadCount > 99 ? '99+' : unreadCount.toString();
+            notificationElement.classList.remove('hidden');
             notificationElement.style.display = 'flex';
         } else {
+            notificationElement.classList.add('hidden');
             notificationElement.style.display = 'none';
         }
     }
@@ -609,3 +630,4 @@ window.initializeChatAfterLogin = function() {
     } else {
     }
 };
+
