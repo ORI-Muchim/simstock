@@ -192,6 +192,35 @@ class SocialHub {
             });
         });
 
+        // Dropdown menu handling
+        const userMenuTrigger = document.querySelector('.user-menu-trigger');
+        const userDropdown = document.querySelector('.user-dropdown');
+        
+        if (userMenuTrigger && userDropdown) {
+            userMenuTrigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                userDropdown.classList.toggle('active');
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!userDropdown.contains(e.target)) {
+                    userDropdown.classList.remove('active');
+                }
+            });
+        }
+
+        // Logout button handler
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                localStorage.removeItem('token');
+                localStorage.removeItem('username');
+                window.location.href = '/login';
+            });
+        }
+
         // Discover controls
         const searchBtn = document.getElementById('search-btn');
         const userSearchInput = document.getElementById('user-search');
