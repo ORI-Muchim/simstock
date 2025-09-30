@@ -354,6 +354,14 @@ function setupSettingsPage() {
     const cancelResetBtn = document.getElementById('cancel-reset-btn');
     const confirmResetBtn = document.getElementById('confirm-reset-btn');
 
+    console.log('Setup settings page - Elements:', {
+        resetAccountBtn: !!resetAccountBtn,
+        resetModal: !!resetModal,
+        closeResetModal: !!closeResetModal,
+        cancelResetBtn: !!cancelResetBtn,
+        confirmResetBtn: !!confirmResetBtn
+    });
+
     // Load current timezone setting first
     console.log('Loading timezone:', userTimezone);
     
@@ -380,50 +388,78 @@ function setupSettingsPage() {
     });
 
     // Reset account data
-    resetAccountBtn.addEventListener('click', () => {
-        resetModal.classList.remove('hidden');
-        setTimeout(() => resetModal.classList.add('show'), 10);
-    });
+    if (resetAccountBtn) {
+        resetAccountBtn.addEventListener('click', () => {
+            if (resetModal) {
+                resetModal.style.display = 'flex';
+                resetModal.classList.remove('hidden');
+                setTimeout(() => {
+                    resetModal.classList.add('show');
+                }, 10);
+            }
+        });
+    }
 
     // Close reset modal
-    closeResetModal.addEventListener('click', () => {
-        resetModal.classList.remove('show');
-        setTimeout(() => resetModal.classList.add('hidden'), 300);
-    });
+    if (closeResetModal) {
+        closeResetModal.addEventListener('click', () => {
+            resetModal.classList.remove('show');
+            setTimeout(() => {
+                resetModal.classList.add('hidden');
+                resetModal.style.display = 'none';
+            }, 300);
+        });
+    }
 
-    cancelResetBtn.addEventListener('click', () => {
-        resetModal.classList.remove('show');
-        setTimeout(() => resetModal.classList.add('hidden'), 300);
-    });
+    if (cancelResetBtn) {
+        cancelResetBtn.addEventListener('click', () => {
+            resetModal.classList.remove('show');
+            setTimeout(() => {
+                resetModal.classList.add('hidden');
+                resetModal.style.display = 'none';
+            }, 300);
+        });
+    }
 
     // Confirm reset
-    confirmResetBtn.addEventListener('click', async () => {
-        // Reset data
-        usdBalance = 10000;
-        btcBalance = 0;
-        transactions = [];
-        leveragePositions = [];
-        
-        // Save to server
-        await saveUserData();
-        
-        // Update UI
-        updateUI();
-        
-        // Close modal
-        resetModal.classList.remove('show');
-        setTimeout(() => resetModal.classList.add('hidden'), 300);
-        
-        showToast('Account data has been reset', 'success');
-    });
+    if (confirmResetBtn) {
+        confirmResetBtn.addEventListener('click', async () => {
+            // Reset data
+            usdBalance = 10000;
+            btcBalance = 0;
+            ethBalance = 0;
+            transactions = [];
+            leveragePositions = [];
+
+            // Save to server
+            await saveUserData();
+
+            // Update UI
+            updateUI();
+
+            // Close modal
+            resetModal.classList.remove('show');
+            setTimeout(() => {
+                resetModal.classList.add('hidden');
+                resetModal.style.display = 'none';
+            }, 300);
+
+            showToast('Account data has been reset', 'success');
+        });
+    }
 
     // Close modal when clicking outside
-    resetModal.addEventListener('click', (e) => {
-        if (e.target === resetModal) {
-            resetModal.classList.remove('show');
-            setTimeout(() => resetModal.classList.add('hidden'), 300);
-        }
-    });
+    if (resetModal) {
+        resetModal.addEventListener('click', (e) => {
+            if (e.target === resetModal) {
+                resetModal.classList.remove('show');
+                setTimeout(() => {
+                    resetModal.classList.add('hidden');
+                    resetModal.style.display = 'none';
+                }, 300);
+            }
+        });
+    }
 
 
     // Update time display every second
