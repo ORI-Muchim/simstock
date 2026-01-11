@@ -97,6 +97,36 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true,
 });
 
+// Authentication middleware (defined early for use in all routes)
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ success: false, error: 'Authentication required', timestamp: new Date().toISOString(), statusCode: 401 });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.status(403).json({ success: false, error: 'Invalid token', timestamp: new Date().toISOString(), statusCode: 403 });
+        req.user = user;
+        next();
+    });
+};
+
+// Admin authorization middleware
+const requireAdmin = async (req, res, next) => {
+    try {
+        const userData = await getUserData(req.user.id);
+        if (!userData || userData.role !== 'admin') {
+            return res.status(403).json({ success: false, error: 'Admin access required', timestamp: new Date().toISOString(), statusCode: 403 });
+        }
+        next();
+    } catch (error) {
+        console.error('Error checking admin role:', error);
+        return res.status(500).json({ success: false, error: 'Authorization check failed', timestamp: new Date().toISOString(), statusCode: 500 });
+    }
+};
+
 // Security middleware
 // CSP configuration with route-specific overrides
 const defaultCSP = {
@@ -903,8 +933,8 @@ dataScheduler.collectInitialData().then(() => {
 
 // API Endpoints
 
-// Performance Monitoring API Endpoints
-app.get('/api/monitoring/status', (req, res) => {
+// Performance Monitoring API Endpoints (admin only)
+app.get('/api/monitoring/status', authenticateToken, requireAdmin, (req, res) => {
     try {
         const status = performanceMonitor.getStatus();
         res.json(createAPIResponse.success(status, 'Monitoring status retrieved successfully'));
@@ -914,7 +944,7 @@ app.get('/api/monitoring/status', (req, res) => {
     }
 });
 
-app.get('/api/monitoring/metrics/:type', (req, res) => {
+app.get('/api/monitoring/metrics/:type', authenticateToken, requireAdmin, (req, res) => {
     try {
         const { type } = req.params;
         const { startTime, endTime } = req.query;
@@ -933,7 +963,7 @@ app.get('/api/monitoring/metrics/:type', (req, res) => {
     }
 });
 
-app.get('/api/monitoring/export/:type', (req, res) => {
+app.get('/api/monitoring/export/:type', authenticateToken, requireAdmin, (req, res) => {
     try {
         const { type } = req.params;
         const { format = 'json' } = req.query;
@@ -954,7 +984,7 @@ app.get('/api/monitoring/export/:type', (req, res) => {
     }
 });
 
-app.post('/api/monitoring/reset-counters', (req, res) => {
+app.post('/api/monitoring/reset-counters', authenticateToken, requireAdmin, (req, res) => {
     try {
         performanceMonitor.resetCounters();
         res.json(createAPIResponse.success(null, 'Counters reset successfully'));
@@ -997,7 +1027,7 @@ app.post('/api/monitoring/reset-counters', (req, res) => {
  *                     type: string
  *                     format: date-time
  */
-app.get('/api/monitoring/alerts', (req, res) => {
+app.get('/api/monitoring/alerts', authenticateToken, requireAdmin, (req, res) => {
     try {
         const activeAlerts = alertManager.getActiveAlerts();
         res.json(createAPIResponse.success(activeAlerts, 'Active alerts retrieved successfully'));
@@ -1026,7 +1056,7 @@ app.get('/api/monitoring/alerts', (req, res) => {
  *       200:
  *         description: Alert history retrieved successfully
  */
-app.get('/api/monitoring/alerts/history', (req, res) => {
+app.get('/api/monitoring/alerts/history', authenticateToken, requireAdmin, (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 100;
         const history = alertManager.getAlertHistory(limit);
@@ -1049,7 +1079,7 @@ app.get('/api/monitoring/alerts/history', (req, res) => {
  *       200:
  *         description: Alert statistics retrieved successfully
  */
-app.get('/api/monitoring/alerts/stats', (req, res) => {
+app.get('/api/monitoring/alerts/stats', authenticateToken, requireAdmin, (req, res) => {
     try {
         const stats = alertManager.getAlertStats();
         res.json(createAPIResponse.success(stats, 'Alert statistics retrieved successfully'));
@@ -1452,7 +1482,7 @@ app.get('/api/candles/:interval', async (req, res) => {
 });
 
 // Delete all market data endpoint (admin only)
-app.delete('/api/candles/all', async (req, res) => {
+app.delete('/api/candles/all', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { pool } = require('./database');
         await pool.query('TRUNCATE TABLE candles RESTART IDENTITY;');
@@ -1465,21 +1495,7 @@ app.delete('/api/candles/all', async (req, res) => {
     }
 });
 
-// Authentication middleware
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (!token) {
-        return res.status(401).json(createAPIResponse.error('Authentication required', null, 401));
-    }
-    
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).json(createAPIResponse.error('Invalid token', null, 403));
-        req.user = user;
-        next();
-    });
-};
+// Authentication middleware is defined earlier in the file (line ~100)
 
 /**
  * @swagger
@@ -1669,7 +1685,9 @@ app.get('/api/user/data', authenticateToken, async (req, res) => {
 // Update user data
 app.post('/api/user/data', authenticateToken, async (req, res) => {
     try {
-        await updateUserData(req.user.id, req.body);
+        // Strip role field to prevent privilege escalation
+        const { role, ...safeData } = req.body;
+        await updateUserData(req.user.id, safeData);
         res.json(createAPIResponse.success(null, 'User data updated successfully'));
     } catch (error) {
         console.error('Error updating user data:', error);
